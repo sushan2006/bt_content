@@ -1,0 +1,25 @@
+# dependencies and builds
+node_modules/
+dist/
+.venv/
+__pycache__/
+*.pyc
+
+# secrets: never commit (copy .env.example to .env)
+.env
+.env.*
+!.env.example
+
+# local data: database, videos, Drive mirror, renders
+.pgdata/
+storage/
+drive_local/
+deliverables/
+dump.rdb
+*.log
+
+# local backups and scratch
+_to_delete/
+_backup_before_simplify/
+*.tgz
+reply.header*
