@@ -30,7 +30,7 @@ export async function rulesFromEngine(origin: 'live' | 'demo' = 'live'): Promise
       if (f === 'opening_style' && v === 'product_demo_first') add('product_in_opening', r, r.title);
       if (f === 'opening_style' && ['question', 'direct_statement', 'problem_first'].includes(v)) add('hook_text', r, r.title, v);
       if (f === 'cta_type' && v && v !== 'none') add('cta_type', r, r.title, v);
-      if (f === 'edit_style' && ['clean', 'branded', 'motion', 'overlay', 'editorial', 'hype', 'cinematic', 'minimal'].includes(v) && !recommended) recommended = v;
+      if (f === 'edit_style' && v && v !== 'none' && !recommended) { recommended = v; add('edit_style', r, r.title, v); }
     } else if (r.insight_type === 'content_risk') {
       for (const x of m.by_moment_type ?? []) {
         const flagged = x.videos >= 4 && ((x.median_ratio ?? 0) >= 1.3 || ((x.median_ratio ?? 0) >= 1.15 && x.worse_in / x.videos >= 0.75));
@@ -67,4 +67,5 @@ export const RULE_PLAIN: Record<string, string> = {
   cta_early: 'Ask for the follow before most viewers leave',
   cta_type: 'Use the call to action that works best',
   target_seconds: 'Keep the video to the length that works best',
+  edit_style: 'Use the editing style that performs best',
 };

@@ -61,8 +61,10 @@ export const FEATURE_PLAIN: Record<string, Record<string, string>> = {
   opening_has_narration: { yes: 'start talking in the first 3 seconds', no: 'have no voice in the first 3 seconds' },
   editing_pace: { fast: 'use fast cuts (a new shot every 3 seconds or less)', medium: 'use a medium editing pace (a new shot every 3–10 seconds)', slow: 'use slow editing (shots longer than 10 seconds)' },
   cta_type: { website: 'end by pointing viewers to the website', enquiry: 'end by asking viewers to get in touch', follow: 'end by asking viewers to follow or subscribe', purchase: 'end with a buy/order call', dm: 'end by asking viewers to message', none: 'have no call to action' },
-  edit_style: { clean: 'use the clean cut with captions', branded: 'use the branded edit (logo, name card, end card)', motion: 'use the split-screen motion-graphics edit', overlay: 'use the full video with floating graphics', editorial: 'use the 3D Explainer style (full-screen 3D explainers between the speaker shots)', hype: 'use the Bold & Fast style', cinematic: 'use the Cinematic Story style', minimal: 'use the Clean & Minimal style' },
-  ai_edited: { yes: 'are edited by the Content Studio', no: 'are edited by hand' },
+  edit_style: { clean: 'use the clean cut with captions', branded: 'use the branded edit (logo, name card, end card)', motion: 'use the split-screen motion-graphics edit', overlay: 'use the full video with floating graphics', editorial: 'use the 3D Explainer style (full-screen 3D explainers between the speaker shots)', hype: 'use the Bold & Fast style', cinematic: 'use the Cinematic Story style', minimal: 'use the Clean & Minimal style',
+    paper_cutout: 'use the Paper Cut-Out style', particles: 'use the Generative Particles style', liquid_glass: 'use the Liquid Glass style', kinetic_type: 'use the Kinetic Typography style',
+    isometric: 'use the Isometric Line Art style', flat_vector: 'use the Flat Vector style', risograph: 'use the Risograph Print style', pixel_art: 'use the 8-Bit Pixel Art style' },
+  ai_edited: { yes: 'are edited with Claude Code from the Studio', no: 'are edited by hand' },
   duration_bucket: { '0-15s': 'are under 15 seconds', '15-30s': 'are 15–30 seconds long', '30-60s': 'are 30–60 seconds long', '1-3min': 'are 1–3 minutes long', '3min+': 'are longer than 3 minutes' },
 };
 export function featurePlain(feature: string, value: string): string {

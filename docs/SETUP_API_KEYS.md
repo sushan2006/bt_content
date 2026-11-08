@@ -14,7 +14,6 @@ This guide explains how to get every credential the platform needs, where to put
 | 2 | Meta App Secret | Meta for Developers app → App settings → Basic | `META_APP_SECRET` | Facebook + Instagram |
 | 3 | Google OAuth Client ID | Google Cloud Console → Credentials | `GOOGLE_CLIENT_ID` | YouTube |
 | 4 | Google OAuth Client Secret | same | `GOOGLE_CLIENT_SECRET` | YouTube |
-| 5 | Anthropic API key (optional) | console.anthropic.com | `ANTHROPIC_API_KEY` | AI vision analysis of video frames + AI-written insight narratives |
 
 You do **not** need separate "API keys" for Instagram or YouTube data. Access works through **OAuth**: you click *Connect*, sign in with the company account, and approve the permissions. The platform then stores and refreshes the tokens itself.
 
@@ -127,24 +126,17 @@ Go to **Integrations → Connect with Google**, choose the account (for a Brand 
 
 ---
 
-## Part B2 — Content Studio: Google Drive & Gmail
+## Part B2 — Content Studio: Google Drive
 
-The Content Studio uses one Google account (personal Gmail for testing, the company account later) for Drive and Gmail.
+The Content Studio keeps each video's material and the finished videos in one Google account's Drive (personal Gmail for testing, the company account later). No AI key is needed: videos are edited in Claude Code from the prompt the dashboard writes.
 
-1. In the same Google Cloud project: **APIs & Services → Library**, enable **Google Drive API** and **Gmail API**.
-2. **OAuth consent screen → Data access / Scopes**: add `drive`, `gmail.send`, `gmail.readonly`. With a personal Gmail add yourself as a test user (or publish the app) — the same 7-day rule as above applies in Testing.
+1. In the same Google Cloud project: **APIs & Services → Library**, enable **Google Drive API**.
+2. **OAuth consent screen → Data access / Scopes**: add `drive`. With a personal Gmail add yourself as a test user (or publish the app) — the same 7-day rule as above applies in Testing.
 3. **Credentials → your OAuth client → Authorised redirect URIs**: add `http://localhost:4000/api/integrations/workspace/callback`.
-4. Restart, then **Integrations → Connect Google Drive & Gmail**. Tick every permission on Google's screen. A folder **Content Studio** appears in that Drive.
-5. **Studio settings**: add the suggestion and approver emails.
+4. Restart, then **Integrations → Connect Google Drive**. Your folders `content_raw` and `content_final` in My Drive are used if they exist; otherwise a folder **Content Studio** is created.
+5. **Studio settings**: add the logo, brand colours and default style.
 
 Publishing (Phase 2) also needs new permissions on the existing connections: reconnect **Facebook** (adds `instagram_content_publish`, `pages_manage_posts`) and **YouTube** (adds `youtube.upload`). Until Google audits the project, YouTube uploads stay private.
-
-## Part C — Optional AI (Anthropic)
-`ANTHROPIC_API_KEY` turns on:
-- **Vision analysis** of sampled video frames: whether the product is visible in the first seconds, shot type, on-screen demos, diagrams
-- **AI-written insight narratives.** These are constrained: every number in the text must already exist in the computed evidence, otherwise the deterministic template is kept
-
-Without the key, everything still works: statistics, retention, transcript (local Whisper), scene/pause detection and template narratives. Visual features show as *unknown* and can be set by hand.
 
 ---
 

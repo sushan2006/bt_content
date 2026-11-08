@@ -15,8 +15,8 @@ export default function Settings() {
 }
 
 const ROLE_TEXT: Record<string, string> = {
-  admin: 'Everything: create and approve videos, publish, connect accounts, run the analysis, manage users and settings.',
-  viewer: 'Sees every page and video and can add suggestions to a video. Cannot approve, publish or change anything.',
+  admin: 'Everything: set up videos and copy their prompts, publish, connect accounts, run the analysis, manage users and settings.',
+  viewer: 'Sees every page and video and can add suggestions to a video while it is being made. Cannot publish or change anything.',
 };
 
 function Users() {

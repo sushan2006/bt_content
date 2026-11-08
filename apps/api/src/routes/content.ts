@@ -67,9 +67,9 @@ export async function contentRoutes(app: FastifyInstance) {
               sum(pv.value) AS total_views, count(pv.value) AS views_available_on, count(p.id) AS publication_count,
               sum(coalesce(pl.value,0) + coalesce(pr.value,0) + coalesce(pc.value,0) + coalesce(ps.value,0) + coalesce(psv.value,0)) AS engagement,
               (SELECT status FROM video_analysis_results v WHERE v.content_item_id=ci.id ORDER BY created_at DESC LIMIT 1) AS analysis_status,
-              (SELECT json_build_object('id', j.id, 'code', j.code, 'status', j.status,
-                        'cover', (SELECT v.id FROM production_versions v WHERE v.job_id=j.id AND v.revision=j.revision AND v.aspect='9:16'
-                                    AND v.variant=coalesce(j.approved_variant, j.recommended_variant) AND v.previews[2] IS NOT NULL LIMIT 1))
+              (SELECT json_build_object('id', j.id, 'code', j.code, 'status', j.status, 'has_final', j.final_drive_file_id IS NOT NULL OR j.final_path IS NOT NULL,
+                        'has_thumb', j.thumbnail_path IS NOT NULL OR EXISTS (SELECT 1 FROM production_files tf WHERE tf.job_id=j.id AND tf.kind='take' AND tf.thumb_path IS NOT NULL),
+                        'thumb_v', floor(extract(epoch from coalesce(j.thumbnail_updated_at, j.updated_at)))::bigint)
                  FROM production_jobs j WHERE j.content_item_id=ci.id ORDER BY j.created_at DESC LIMIT 1) AS studio
          FROM content_items ci
          LEFT JOIN content_categories cc ON cc.id=ci.category_id

@@ -133,7 +133,7 @@ try {
   await stop(1);
 }
 
-// ---------- Video service (Python): take selection, editing, rendering (Content Studio) + video analysis
+// ---------- Video service (Python): video analysis for the analytics + measuring reference styles (no editing happens here)
 let analyzer = null;
 async function startVideoService() {
   const an = path.join(root, 'services', 'analyzer');
@@ -141,10 +141,10 @@ async function startVideoService() {
   const venvPy = path.join(an, '.venv', isWin ? 'Scripts/python.exe' : 'bin/python');
   const ok = (cmd) => spawnSync(cmd, { shell: true, stdio: 'ignore' }).status === 0;
   if (!fs.existsSync(venvPy)) {
-    // skia / OpenCV / faster-whisper have wheels for Python 3.10-3.13
+    // OpenCV / faster-whisper have wheels for Python 3.10-3.13
     const candidates = isWin ? ['py -3.12', 'py -3.11', 'py -3.13', 'py -3.10', 'python'] : ['python3.12', 'python3.11', 'python3'];
     const py = candidates.find((c) => ok(`${c} -c "import sys; assert (3,10) <= sys.version_info[:2] <= (3,13)"`));
-    if (!py) { console.log('  Python 3.10-3.13 not found: the Content Studio cannot edit videos. Install Python 3.12 from python.org and run again.'); return; }
+    if (!py) { console.log('  Python 3.10-3.13 not found: video analysis and reference-style measuring are off (everything else works). Install Python 3.12 from python.org and run again.'); return; }
     log(`Creating the video service environment with ${py} (first run only)`);
     run(`${py} -m venv .venv`, an);
   }

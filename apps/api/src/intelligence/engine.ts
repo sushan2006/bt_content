@@ -16,7 +16,6 @@ import { mannWhitney, mean, median } from './stats.js';
 import { benjaminiHochberg, driversModel, DriverEffect, expectedModel, gradeFromZ, shrinkGroups } from './models.js';
 import { CurveDiagnostics, diagnoseCurve, hookHoldDiagnosis, Shape, SHAPE_PLAIN } from './curve.js';
 import { per1000, actionPlain, SHAPE_VERB, shortValue, certaintyWords, clock, compareHeadline, compareSentence, featurePlain, fractionWords, inTen, OUTCOME_PLAIN, PLATFORM, ratioWords, videosNeeded } from './plain.js';
-import { polishStory } from './narrative.js';
 
 export const METRIC_LABELS: Record<string, string> = Object.fromEntries(Object.entries(OUTCOME_PLAIN).map(([k, v]) => [k, v.name]));
 
@@ -38,7 +37,7 @@ export interface Finding {
   platform: string | null;
   rec_category: 'content' | 'platform' | 'publishing' | 'experiment' | 'data';
   experiment?: { variable: string; a: string; b: string; metric: string; per_arm: number } | null;
-  narrative_source?: 'template' | 'llm';
+  narrative_source?: 'template';
 }
 const CONF: Record<Finding['certainty'], 'strong' | 'moderate' | 'preliminary' | 'insufficient'> = {
   'strong evidence': 'strong', 'good evidence': 'moderate', 'early signal': 'preliminary', 'not enough data': 'insufficient',
@@ -532,7 +531,6 @@ export async function runIntelligence(opts: { scope?: 'live' | 'demo'; userId?: 
     ...trend(rows, diags), ...dataGaps(rows, scope, cfg),
   ].sort((a, b) => b.rank_score - a.rank_score);
 
-  for (const f of findings) await polishStory(f);
 
   const origin = scope === 'demo' ? 'demo' : 'live';
   await q(`UPDATE ai_insights SET status='superseded' WHERE status='active' AND data_origin=$1`, [origin]);

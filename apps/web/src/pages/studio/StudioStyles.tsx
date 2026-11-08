@@ -1,25 +1,19 @@
-import { useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import StudioMusic from './StudioMusic';
+import StylePreview from './StylePreview';
 import { api, can, useApi } from '../../lib';
 import { useMe } from '../../main';
 import { Badge, Button, Card, Empty, ErrorBox, Field, inputCls, Loading, PageHeader } from '../../components/ui';
 import { uploadFiles } from './common';
 
-const LOOK: Record<string, string[]> = {
-  editorial: ['Cuts to full-screen 3D explainers while you keep talking', '3D machines rise from behind you', 'Kinetic captions, key words large', 'Soft air whooshes only'],
-  hype: ['Framing changes every ~2 s', 'Zoom pulses and small shakes on key words', 'Big boxed captions, word by word', 'Black statement cards for numbers'],
-  cinematic: ['Letterbox bars, teal-orange film grade, grain', 'Chapter cards that dip to black', 'Slow push-ins, 3D explainers kept', 'Subtle sentence captions, ambient music'],
-  minimal: ['Cuts only on sentences', 'Soft-box captions at the bottom', 'Clean white number cards and a name card', 'Almost no sound effects'],
-};
-
-/** Editing styles and the music library on one page, as two tabs. */
+/** Editing styles (the nine presets and styles learned from reference videos) and the music library, as two tabs. */
 export default function StudioStyles() {
   const [params, setParams] = useSearchParams();
   const tab = params.get('tab') === 'music' ? 'music' : 'styles';
   return (
     <>
-      <PageHeader title="Styles & music" subtitle="How the videos look and sound: the editing styles to choose from, and the licensed music they can use" />
+      <PageHeader title="Styles & music" subtitle="The looks Claude can edit in, styles copied from videos you like, and the licensed music" />
       <div className="flex gap-1 border-b border-stone-200 mb-5 text-sm">
         {[['styles', 'Editing styles'], ['music', 'Music library']].map(([k, l]) => (
           <button key={k} onClick={() => setParams(k === 'music' ? { tab: 'music' } : {})} className={`px-3 py-2 -mb-px border-b-2 ${tab === k ? 'border-ink text-ink font-medium' : 'border-transparent text-ink-2 hover:text-ink'}`}>{l}</button>))}
@@ -29,42 +23,88 @@ export default function StudioStyles() {
   );
 }
 
+export function PresetCard({ s, onOpen, selected, compact }: { s: any; onOpen: () => void; selected?: boolean; compact?: boolean }) {
+  return (
+    <button type="button" onClick={onOpen} className={`w-full h-full text-left bg-white border rounded-xl overflow-hidden transition flex flex-col ${selected ? 'border-ink ring-2 ring-ink/20' : 'border-stone-200 hover:border-stone-400'}`}>
+      <StylePreview styleKey={s.key} className="rounded-none" />
+      <div className={compact ? 'p-2.5' : 'p-4'}>
+        <div className="flex items-center gap-2">
+          <span className="w-6 h-6 rounded-full border-2 border-ink text-xs font-semibold flex items-center justify-center shrink-0">{s.number}</span>
+          <span className={`font-semibold text-ink truncate ${compact ? 'text-[13px]' : ''}`} title={s.name}>{s.name}</span>
+          {selected && !compact && <Badge color="green">Chosen</Badge>}
+        </div>
+        {!compact && <div className="text-[11px] text-ink-3 mt-1 font-mono">{s.technique}</div>}
+        <div className={`text-ink-2 mt-1 ${compact ? 'text-[11px] leading-snug' : 'text-sm'}`}>{compact ? s.tagline : s.about}</div>
+      </div>
+    </button>
+  );
+}
+
+/** Everything about one preset: the sample, what it looks like, what it is best for. */
+export function PresetDetail({ s, onClose, action }: { s: any; onClose: () => void; action?: React.ReactNode }) {
+  useEffect(() => { const h = (e: KeyboardEvent) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h); }, [onClose]);
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center overflow-y-auto p-6" onClick={onClose}>
+      <div className="bg-white rounded-2xl max-w-3xl w-full p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start gap-3">
+          <span className="w-9 h-9 rounded-full border-2 border-ink font-semibold flex items-center justify-center shrink-0">{s.number}</span>
+          <div className="flex-1 min-w-0"><div className="text-xl font-semibold text-ink">{s.name}</div><div className="text-xs text-ink-3 font-mono">{s.tagline} · {s.technique}</div></div>
+          <button onClick={onClose} className="text-ink-3 hover:text-ink text-xl leading-none px-2" aria-label="Close">✕</button>
+        </div>
+        <StylePreview styleKey={s.key} className="mt-4 border border-stone-200" />
+        <div className="text-[11px] text-ink-3 mt-1">A sample in this style, drawn live in your browser. Your video follows your own topic.</div>
+        <div className="grid sm:grid-cols-2 gap-5 mt-4 text-sm">
+          <div><div className="text-[11px] uppercase tracking-wider font-semibold text-ink-3 mb-1">What it looks like</div><div className="text-ink-2">{s.looks}</div></div>
+          <div><div className="text-[11px] uppercase tracking-wider font-semibold text-ink-3 mb-1">Best for</div><div className="text-ink-2">{s.best_for}</div></div>
+        </div>
+        {s.good_to_know && <div className="mt-4 border border-red-300 bg-red-50/40 rounded-lg p-3 text-sm"><div className="text-[11px] uppercase tracking-wider font-semibold text-red-800 mb-1">Good to know</div><div className="text-ink-2">{s.good_to_know}</div></div>}
+        <div className="text-xs text-ink-3 mt-3">Example topic: <i>{s.example_topic}</i></div>
+        {action && <div className="mt-5 flex justify-end gap-2">{action}</div>}
+      </div>
+    </div>
+  );
+}
+
 function Styles() {
   const me = useMe();
+  const nav = useNavigate();
   const { data, reload } = useApi<any[]>('/api/studio/styles');
+  const [open, setOpen] = useState<any>(null);
   const [file, setFile] = useState<File | null>(null);
   const [name, setName] = useState('');
+  const [notes, setNotes] = useState('');
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
   const [err, setErr] = useState<string | null>(null);
+  const anyBusy = (data ?? []).some((r) => r.status === 'analysing');
+  useEffect(() => { if (!anyBusy) return; const t = setTimeout(reload, 4000); return () => clearTimeout(t); }, [anyBusy, data]);
   if (!data) return <Loading />;
   const manage = can(me, 'studio.manage');
-  const builtins = data.filter((s) => s.group === 'style');
+  const presets = data.filter((s) => s.group === 'preset');
   const refs = data.filter((s) => s.group === 'reference');
-  const anyBusy = refs.some((r) => r.status === 'analysing');
-  if (anyBusy) setTimeout(reload, 4000);
 
   const add = async () => {
     if (!file) return;
     setErr(null); setBusy(true);
-    try { await uploadFiles('/api/studio/styles', [file], { name }, setProgress); setFile(null); setName(''); reload(); }
+    try { await uploadFiles('/api/studio/styles', [file], { name, notes }, setProgress); setFile(null); setName(''); setNotes(''); reload(); }
     catch (e) { setErr((e as Error).message); }
     setBusy(false);
   };
 
   return (
     <>
-      <p className="text-sm text-ink-2 mb-4">Every video can be made in several styles at once. Add your own by showing the studio a video you like.</p>
-      <div className="grid md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
-        {builtins.map((s) => (
-          <Card key={s.key} title={s.name}>
-            <div className="text-xs text-ink-2 mb-2">{s.about}</div>
-            <ul className="text-xs text-ink-2 space-y-1">{(LOOK[s.key] ?? []).map((l) => <li key={l}>• {l}</li>)}</ul>
-          </Card>
-        ))}
+      <div className="flex items-baseline justify-between mb-3">
+        <h2 className="text-base font-semibold text-ink">Preset styles</h2>
+        <span className="text-xs text-ink-3">Click a style to see it move. Each video is made in one style.</span>
       </div>
+      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
+        {presets.map((s) => <PresetCard key={s.key} s={s} onOpen={() => setOpen(s)} />)}
+      </div>
+      {open && <PresetDetail s={open} onClose={() => setOpen(null)} action={manage && <Button variant="primary" onClick={() => nav(`/studio/new?style=${open.key}`)}>Make a video in this style →</Button>} />}
+
+      <h2 className="text-base font-semibold text-ink mb-3">Styles from your reference videos</h2>
       <div className="grid lg:grid-cols-3 gap-5">
-        <Card title="Learn a style from a reference video" subtitle="Upload an edit you like (an Instagram reel, a YouTube Short…). The studio measures how it is cut and turns it into a style.">
+        <Card title="Copy the style of a video you like" subtitle="Upload an edit you like (a reel, a Short, an ad). Claude copies its style: pacing, how graphics come in, captions, colour and sound. Never its footage or music.">
           {manage ? (
             <>
               <label className="block border-2 border-dashed border-stone-300 rounded-xl p-5 text-center cursor-pointer hover:border-stone-400 bg-stone-50">
@@ -72,69 +112,54 @@ function Styles() {
                 <div className="text-sm font-medium">{file ? file.name : 'Choose a reference video'}</div>
                 <div className="text-xs text-ink-3 mt-1">MP4 or MOV, up to a few minutes</div>
               </label>
-              <div className="mt-3"><Field label="Style name"><input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Tharun explainer" /></Field></div>
+              <div className="mt-3 space-y-3">
+                <Field label="Style name"><input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Tharun explainer" /></Field>
+                <Field label="What do you like about it? (optional)" hint="Claude reads this with the video"><textarea className={`${inputCls} h-16`} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="The way 3D objects rise behind the speaker, the fast captions" /></Field>
+              </div>
               <ErrorBox error={err} />
-              <Button variant="primary" disabled={!file || busy} onClick={add}>{busy ? `Uploading ${Math.round(progress * 100)}%` : 'Learn this style'}</Button>
-              <div className="text-[11px] text-ink-3 mt-3 leading-relaxed">With a Claude API key, Claude also watches the video and writes a <b>style card</b> (pacing, graphics, captions, colour, sound, do's and don'ts) that it follows whenever this style is chosen. It measures: how often it cuts, how much of it is full-screen graphics and whether they are light or dark, the colour grade and letterbox, where the captions sit and their highlight colour, how many sound effects there are and how loud the music is. The closest built-in style is used as the base, with those numbers applied.</div>
+              <div className="mt-3"><Button variant="primary" disabled={!file || busy} onClick={add}>{busy ? `Uploading ${Math.round(progress * 100)}%` : 'Save this style'}</Button></div>
+              <div className="text-[11px] text-ink-3 mt-3 leading-relaxed">The video is kept in Google Drive › _assets › style_references so Claude can watch it. The studio also measures it (how often it cuts, share of full-screen graphics, colour, caption position, sound) and those numbers go into the prompt.</div>
             </>
-          ) : <Empty>You need the studio.manage permission to add styles.</Empty>}
+          ) : <Empty>Only an Admin can add styles.</Empty>}
         </Card>
-        <Card title="Styles learned from your videos" className="lg:col-span-2">
+        <Card title={`Your reference styles (${refs.length})`} className="lg:col-span-2">
           {!refs.length ? <Empty>None yet. Upload a reference video on the left.</Empty> : (
             <div className="space-y-4">
-              {refs.map((r) => (
-                <div key={r.key} className="border border-stone-200 rounded-xl p-4 flex gap-4">
-                  <video src={`/api/studio/styles/${r.id}/video`} className="w-28 aspect-[9/16] bg-black rounded-lg object-cover shrink-0" muted controls preload="metadata" />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2"><span className="font-semibold text-ink">{r.name}</span>
-                      {r.status === 'ready' ? <Badge color="green">Ready</Badge> : r.status === 'failed' ? <Badge color="red">Failed</Badge> : <Badge color="blue">Analysing…</Badge>}
-                      {r.base_name && <span className="text-xs text-ink-3">based on {r.base_name}</span>}</div>
-                    <div className="text-[11px] text-ink-3">from {r.source}</div>
-                    {r.error && <div className="text-xs text-red-700 mt-1">{r.error}</div>}
-                    {r.card ? <StyleCard r={r} manage={manage} onSaved={reload} />
-                      : (r.report ?? []).length > 0 && <ul className="text-xs text-ink-2 mt-2 space-y-0.5">{r.report.map((l: string) => <li key={l}>• {l}</li>)}</ul>}
-                    {manage && <div className="mt-2 flex gap-2">
-                      <select className="text-xs border border-stone-300 rounded px-1 py-0.5" value={r.base} onChange={async (e) => { await api(`/api/studio/styles/${r.id}`, { method: 'PATCH', body: { base: e.target.value } }); reload(); }}>
-                        <option value="explainer3d">Base: 3D Explainer</option><option value="hype">Base: Bold & Fast</option><option value="cinematic">Base: Cinematic Story</option><option value="minimal">Base: Clean & Minimal</option>
-                      </select>
-                      <Button small variant="danger" onClick={async () => { if (confirm(`Delete the style "${r.name}"?`)) { await api(`/api/studio/styles/${r.id}`, { method: 'DELETE' }); reload(); } }}>Delete</Button>
-                    </div>}
-                  </div>
-                </div>))}
+              {refs.map((r) => <RefStyle key={r.key} r={r} manage={manage} onChanged={reload} onUse={() => nav(`/studio/new?style=${encodeURIComponent(r.key)}`)} />)}
             </div>)}
-          <div className="text-[11px] text-ink-3 mt-3">Pick these styles when you create a video, or make them the default in Studio settings.</div>
         </Card>
       </div>
     </>
   );
 }
 
-function StyleCard({ r, manage, onSaved }: { r: any; manage: boolean; onSaved: () => void }) {
-  const c = r.card ?? {};
+function RefStyle({ r, manage, onChanged, onUse }: { r: any; manage: boolean; onChanged: () => void; onUse: () => void }) {
   const [edit, setEdit] = useState(false);
-  const [text, setText] = useState('');
+  const [notes, setNotes] = useState(r.notes ?? '');
   const [err, setErr] = useState<string | null>(null);
-  const row = (label: string, v: any) => v ? <div className="text-xs"><span className="text-ink-3">{label}: </span><span className="text-ink-2">{v}</span></div> : null;
   return (
-    <div className="mt-2 bg-violet-50/60 border border-violet-100 rounded-lg p-3 space-y-1">
-      <div className="text-[11px] uppercase tracking-wide font-semibold text-violet-900">Style card written by Claude</div>
-      {c.summary && <div className="text-sm text-ink">{c.summary}</div>}
-      {row('Pacing', [c.pacing?.cut_every ? `a cut every ${c.pacing.cut_every} s` : null, c.pacing?.notes].filter(Boolean).join(' · '))}
-      {row('Transitions', [c.transitions?.into_graphics, c.transitions?.engine_in ? `engine: ${c.transitions.engine_in} in / ${c.transitions.engine_out ?? 'cut'} out` : null].filter(Boolean).join(' · '))}
-      {row('Motion graphics', [c.motion_graphics?.how_they_enter, (c.motion_graphics?.signature_effects ?? []).join(', ')].filter(Boolean).join(' · '))}
-      {row('Graphics', [c.graphics?.look, c.graphics?.motion].filter(Boolean).join(' · '))}
-      {row('Captions', [c.captions?.mode, c.captions?.notes].filter(Boolean).join(' · '))}
-      {row('Look', [c.look?.grade?.replace('_', '-'), c.look?.notes].filter(Boolean).join(' · '))}
-      {row('Sound', [c.sound?.music, c.sound?.sfx].filter(Boolean).join(' · '))}
-      {(c.replicate ?? []).length > 0 && <div className="text-xs text-ink-2"><span className="text-ink-3">Claude will: </span>{c.replicate.join(' · ')}</div>}
-      {(c.do ?? []).length > 0 && <div className="text-xs text-emerald-800">Do: {c.do.join(' · ')}</div>}
-      {(c.dont ?? []).length > 0 && <div className="text-xs text-red-800">Don't: {c.dont.join(' · ')}</div>}
-      {manage && !edit && <button className="text-[11px] underline text-ink-2" onClick={() => { setText(JSON.stringify(c, null, 2)); setEdit(true); }}>Edit the style card</button>}
-      {edit && <div className="space-y-1">
-        <textarea className="w-full h-64 font-mono text-[11px] border border-stone-300 rounded p-2" value={text} onChange={(e) => setText(e.target.value)} />
-        {err && <div className="text-xs text-red-700">{err}</div>}
-        <div className="flex gap-2"><Button small variant="primary" onClick={async () => { try { await api(`/api/studio/styles/${r.id}`, { method: 'PATCH', body: { card: JSON.parse(text) } }); setEdit(false); onSaved(); } catch (e) { setErr((e as Error).message); } }}>Save</Button>
-          <Button small onClick={() => setEdit(false)}>Cancel</Button></div>
-      </div>}
-    </div>);
+    <div className="border border-stone-200 rounded-xl p-4 flex gap-4">
+      <video src={`/api/studio/styles/${r.id}/video`} className="w-28 aspect-[9/16] bg-black rounded-lg object-cover shrink-0" muted controls preload="metadata" />
+      <div className="min-w-0 flex-1 text-sm">
+        <div className="flex items-center gap-2 flex-wrap"><span className="font-semibold text-ink">{r.name}</span>
+          {r.status === 'analysing' ? <Badge color="blue">Measuring…</Badge> : r.status === 'failed' ? <Badge color="red">Failed</Badge> : <Badge color="green">Ready</Badge>}
+          {r.drive_link && <a className="text-xs underline text-ink-2" href={r.drive_link} target="_blank" rel="noreferrer">In Drive</a>}</div>
+        <div className="text-[11px] text-ink-3">from {r.source}</div>
+        {r.about && <div className="text-ink-2 mt-1">{r.about}</div>}
+        {(r.report ?? []).length > 0 && <ul className="text-xs text-ink-2 mt-2 space-y-0.5">{r.report.map((l: string) => <li key={l}>• {l}</li>)}</ul>}
+        {r.error && <div className="text-xs text-amber-800 mt-1">{r.error}</div>}
+        {!edit ? (r.notes ? <div className="text-xs text-ink-2 mt-2"><span className="text-ink-3">What we like: </span>{r.notes}</div> : null) : (
+          <div className="mt-2 space-y-1">
+            <textarea className={`${inputCls} h-16 text-xs`} value={notes} onChange={(e) => setNotes(e.target.value)} />
+            <ErrorBox error={err} />
+            <div className="flex gap-2"><Button small variant="primary" onClick={async () => { try { await api(`/api/studio/styles/${r.id}`, { method: 'PATCH', body: { notes } }); setEdit(false); onChanged(); } catch (e) { setErr((e as Error).message); } }}>Save</Button><Button small onClick={() => setEdit(false)}>Cancel</Button></div>
+          </div>)}
+        {manage && !edit && <div className="mt-3 flex flex-wrap gap-2">
+          <Button small variant="primary" disabled={r.status === 'analysing'} onClick={onUse}>Make a video in this style</Button>
+          <Button small onClick={() => setEdit(true)}>{r.notes ? 'Edit notes' : 'Add notes'}</Button>
+          <Button small variant="danger" onClick={async () => { if (!confirm(`Delete the style "${r.name}"?`)) return; try { await api(`/api/studio/styles/${r.id}`, { method: 'DELETE' }); onChanged(); } catch (e) { alert((e as Error).message); } }}>Delete</Button>
+        </div>}
+      </div>
+    </div>
+  );
 }

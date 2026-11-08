@@ -23,3 +23,4 @@ _to_delete/
 _backup_before_simplify/
 *.tgz
 reply.header*
+_backups/

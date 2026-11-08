@@ -3,7 +3,6 @@ import { bootstrapDiffCI, cliffsDelta, confidenceFor, mannWhitney, median, perce
 import { dropOffPoints, normaliseCurve, resolveSegments, retentionAt, segmentRetention } from '../src/intelligence/segments.js';
 import { parseFbRetention } from '../src/integrations/facebook.js';
 import { parseIsoDuration } from '../src/integrations/youtube.js';
-import { numbersAreGrounded } from '../src/intelligence/narrative.js';
 
 const cfg = { min_sample_preliminary: 4, min_sample_moderate: 8, min_sample_strong: 15, alpha: 0.05 };
 
@@ -90,10 +89,5 @@ describe('platform parsing', () => {
     expect(parseIsoDuration('PT1M5S')).toBe(65);
     expect(parseIsoDuration('PT1H2M3S')).toBe(3723);
     expect(parseIsoDuration('PT45S')).toBe(45);
-  });
-  it('LLM narrative guard rejects invented numbers', () => {
-    const ev = JSON.stringify({ a: '82%', n: 4 });
-    expect(numbersAreGrounded('Retention was 82% across 4 videos', ev)).toBe(true);
-    expect(numbersAreGrounded('Retention was 91% across 4 videos', ev)).toBe(false);
   });
 });

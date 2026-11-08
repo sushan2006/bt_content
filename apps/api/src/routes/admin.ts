@@ -57,7 +57,7 @@ export async function adminRoutes(app: FastifyInstance) {
 
   app.get('/api/system/health', { preHandler: authenticate }, async () => ({
     api: 'ok', db: (await one('SELECT 1 AS ok'))?.ok === 1, analyzer: await analyzerHealth(),
-    redis: env.REDIS_URL ? 'configured' : 'not configured (in-process scheduler)', llm_narrative: !!env.ANTHROPIC_API_KEY,
+    redis: env.REDIS_URL ? 'configured' : 'not configured (in-process scheduler)',
   }));
 
 }

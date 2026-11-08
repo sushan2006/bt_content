@@ -1,14 +1,14 @@
-# Social Media Intelligence & Content Automation Platform — Phase 1
+# Social Media Intelligence & Content Automation Platform
 
 Connects Instagram, Facebook and YouTube through their official APIs and analyses **social media performance only** (no website analytics). It keeps the full history of every metric, links each original video to all its platform publications, analyses what happens inside each video (opening, middle, ending, segments) and explains, with statistics and evidence, which content characteristics are associated with better retention, engagement, shares and saves.
 
 - **Setup guide for API keys and accounts:** [`docs/SETUP_API_KEYS.md`](docs/SETUP_API_KEYS.md)
 - **Architecture & flowcharts:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 - **Research & design decisions:** [`docs/RESEARCH_AND_DECISIONS.md`](docs/RESEARCH_AND_DECISIONS.md)
-- **Phase 2 plan:** [`docs/PHASE2_PLAN.md`](docs/PHASE2_PLAN.md)
+- **Content Studio (videos edited by Claude Code):** [`docs/PHASE4_PLAN.md`](docs/PHASE4_PLAN.md) · how the edits are built: [`docs/EDITING_GUIDE.md`](docs/EDITING_GUIDE.md)
 
 ## Stack
-React + TypeScript + Tailwind + ECharts · Node.js + TypeScript + Fastify · PostgreSQL · Redis + BullMQ (optional locally) · Python FastAPI analyzer with FFmpeg + faster-whisper (+ optional Claude vision).
+React + TypeScript + Tailwind + ECharts · Node.js + TypeScript + Fastify · PostgreSQL · Redis + BullMQ (optional locally) · Python FastAPI analyzer with FFmpeg + faster-whisper.
 
 ## Requirements (Windows, macOS or Linux)
 | Tool | Version | Windows install |
@@ -71,40 +71,32 @@ Then switch **Data → Demo data** at the top right. Demo records are synthetic,
 6. **Recommendations** → accept, reject or test. **Experiments** → assign videos to variants → evaluate.
 7. **Executive brief** → the one-page summary for management.
 
-## Content Studio (Phase 2)
+## Content Studio (Phase 4: edited by Claude Code)
 
-Sidebar → **Content Studio**. Upload the raw video with a few details (or drop a folder into Google Drive › `content_raw`), and the studio:
-picks the best take for every line → edits one version per chosen style → the versions appear in the dashboard (and in `content_mid_suggestions`
-in Drive) → a colleague approves one or asks for changes in the dashboard → the approved video goes to `content_final` and the Completed page.
-The video service (Python, `services/analyzer`) is started automatically by `RUN_DEMO.bat`; the first run installs its packages
-and the first video downloads the speech model (~460 MB).
+The dashboard sets the video up and writes the prompt; the edit itself is made in a Claude Code chat (your Claude plan, no API key or token cost).
+1. **New video**: pick one of the 9 styles (8 animated looks plus **Simple Edit**: clean cuts of real footage, no graphics or captions, for office tours and factory walk-throughs; or a style copied from a reference video), say what the video is about, choose what Claude gets
+   (camera takes, a voiceover MP3, or nothing), length, format (9:16 / 16:9), storyboard first, music and sound effects. Takes and pictures go to Drive.
+2. The video page has **Copy prompt**. Paste it into a new Claude Code chat in the `content_bt` project and attach the footage.
+   The prompt carries the brief, the full style spec, brand kit, Drive links, colleagues' suggestions and what the analytics say works.
+3. When you approve the edit in the chat, Claude delivers `JOB-012 <title>.mp4`, `JOB-012 thumbnail.jpg` and `JOB-012 captions.txt`. Put them in Drive › **content_final**
+   (or use *Upload final video* on the video page). The dashboard checks content_final every few minutes, completes the video and reads the captions.
+   Any other video put in content_final is added as a new completed video.
+   **Thumbnails:** every video gets one: Claude's `JOB-012 thumbnail.jpg`, else a good frame picked automatically. Change it on the video page (upload a picture, or pause on a frame and *Use the paused frame*). It shows in the dashboard and is the cover when publishing (Instagram `cover_url` when the API has a public https address, otherwise the frame time; Facebook and YouTube upload it after the post; YouTube needs a verified channel).
+4. **Completed → Publish**: captions per platform (pre-filled), publish now or schedule. Posts are linked to the analytics.
 
-## Claude director (Phase 3)
-
-With `ANTHROPIC_API_KEY=...` in `.env` (no restart needed) Claude plans every edit instead of the fixed rules:
-1. **Watches and listens**: the timed transcript (word ids) and frames of the footage.
-2. **Researches** the topic on the web (facts, terms, how it works, how it looks), shown with sources on the job page.
-3. **Directs** each style: what to cut, when to leave the speaker for a full-screen 3D explainer or diagram and when to come back,
-   which 3D objects rise behind the speaker, what they do on which word, which words become big, spelling fixes for the captions.
-   New objects are **modelled by Claude** with the 3D building kit and saved as `.glb` in the asset library (reused by later videos).
-4. **Checks its storyboard** (frames of its own edit + previews of its models) and fixes what is wrong.
-5. The engine renders exactly that on this computer. Change requests from reviewers go back to Claude as a revision.
-
-How Claude knows how to edit: the **Director Handbook** in `services/analyzer/studio/director/handbook/` (role, editing principles,
-what the engine can render, the direction format, and the approved water-motor edit as a worked example). Edit those files to change the house style.
-Styles learned from a reference video get a **style card** written by Claude (Editing styles page, editable).
-Machines can be modelled by Claude from photos (Machine library, or "+ A new machine" on the New video form), with the photos mapped on, as `.glb`.
-Studio settings → Claude director: planner on/off, models (Opus 5.5 to direct, Sonnet 5.5 for research), web research, storyboard checks, budget per video.
-Typical cost: about $1–2 per style for a 1-minute video. Without a key, or when the budget is reached, the automatic editor is used.
+Stages: Prompt ready → Editing with Claude → Ready to publish → Published. How Claude builds the edits: `docs/EDITING_GUIDE.md`. Plan: `docs/PHASE4_PLAN.md`.
+The Python service (`services/analyzer`) only analyses published videos for the analytics and measures reference styles; it edits nothing.
 
 ## Tests
 
-Python studio tests: `services/analyzer/.venv/Scripts/python -m pytest services/analyzer/tests`
+End to end (with RUN_DEMO.bat running): `node scripts/e2e-studio.mjs`
+
+Python tests: `services/analyzer/.venv/Scripts/python -m pytest services/analyzer/tests`
 ```
 createdb content_bt_test     # once (or: CREATE DATABASE content_bt_test;)
 npm test
 ```
-21 tests: statistics, segment fitting, retention maths, platform parsing, the LLM grounding guard, and integration tests of all four adapters against mocked API responses with a real database (snapshots, unavailable-vs-zero, deprecated-metric fallback, token expiry, pagination loops).
+Tests: statistics, segment fitting, retention maths, platform parsing, the Claude Code prompt and captions file, and integration tests of all four adapters against mocked API responses with a real database (snapshots, unavailable-vs-zero, deprecated-metric fallback, token expiry, pagination loops).
 
 ## Project layout
 ```
@@ -112,7 +104,7 @@ apps/api            Fastify API, adapters, sync, intelligence engine (TypeScript
 apps/web            React dashboard
 services/analyzer   Python video-understanding service
 db/migrations       SQL schema + reference data
-docs/               Setup guide, architecture, research, Phase 2 plan
+docs/               Setup guide, architecture, research, plans, editing guide
 scripts/            setup + start scripts
 storage/media       Uploaded master videos (local; object storage in cloud)
 ```

@@ -45,7 +45,6 @@ function Finding({ i }: { i: any }) {
         <Badge>{TYPES[i.insight_type] ?? fmt.label(i.insight_type)}</Badge>
         <CertaintyBadge c={i.certainty ?? 'not enough data'} />
         {i.cohort?.platform && i.cohort.platform !== 'all' && <PlatformTag code={i.cohort.platform} />}
-        {i.narrative_source === 'llm' && <span className="text-[11px] text-ink-3">wording polished by AI · numbers checked</span>}
       </div>
       <h2 className="text-lg font-semibold leading-snug text-ink">{i.headline ?? i.title}</h2>
       <div className="grid gap-4 mt-4">

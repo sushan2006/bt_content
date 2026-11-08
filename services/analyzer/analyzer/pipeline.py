@@ -67,7 +67,7 @@ def analyze(path: str, *, transcript_text: str | None = None, language: str | No
         frames = media.extract_frames(path, times, tmp)
         for f in frames:
             f["ocr"] = vision.ocr(f["path"])
-        vis = vision.describe_frames(frames, product, company) if use_vision else None
+        vis = None   # no vision model: visual judgements stay "unknown" for a person to set
         vision_ok = bool(vis) and "error" not in vis
         if vision_ok:
             by_t = {round(float(x.get("t", -1)), 1): x for x in vis.get("frames", [])}
@@ -230,7 +230,7 @@ def analyze(path: str, *, transcript_text: str | None = None, language: str | No
             "analyzer_version": ANALYZER_VERSION, "duration": round(dur, 3),
             "probe": pr.__dict__, "scenes": scenes, "silences": silences, "loudness": loud,
             "transcript": transcript, "transcript_status": t_status,
-            "frames": frames, "vision_status": "ok" if vision_ok else ("error: " + vis["error"] if vis and "error" in vis else "disabled: no ANTHROPIC_API_KEY" if not os.environ.get("ANTHROPIC_API_KEY") else "skipped"),
+            "frames": frames, "vision_status": "not used",
             "ocr_status": "ok" if vision.ocr_available() else "unavailable: tesseract not installed",
             "summary": summary, "features": features,
         }

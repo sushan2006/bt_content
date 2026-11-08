@@ -23,8 +23,6 @@ const schema = z.object({
   META_GRAPH_VERSION: z.string().default('v25.0'),
   GOOGLE_CLIENT_ID: z.string().optional().default(''),
   GOOGLE_CLIENT_SECRET: z.string().optional().default(''),
-  ANTHROPIC_API_KEY: z.string().optional().default(''),
-  ANTHROPIC_MODEL: z.string().default('claude-sonnet-5-5'),
 });
 
 const parsed = schema.safeParse(process.env);

@@ -1,4 +1,0 @@
-modnet.onnx — MODNet portrait matting model (Ke et al., "MODNet: Real-Time Trimap-Free Portrait Matting via Objective Decomposition", AAAI 2022).
-Source: https://github.com/ZHKKKe/MODNet  (ONNX export: https://huggingface.co/Xenova/modnet)
-License: Apache License 2.0 — https://www.apache.org/licenses/LICENSE-2.0
-Used by studio/editorial.py to place text behind the speaker.

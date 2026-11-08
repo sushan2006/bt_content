@@ -9,8 +9,7 @@ const STATUS: Record<string, { label: string; color: any }> = {
   needs_attention: { label: '⚠ Needs attention', color: 'red' }, insufficient_data: { label: 'Not enough data yet', color: 'gray' },
 };
 const JOB_STAGE: Record<string, string> = {
-  new: 'Raw footage', waiting_suggestions: 'In suggestions', analyzing: 'Being edited', planning: 'Being edited', rendering: 'Being edited', changes_requested: 'Being edited',
-  in_review: 'Waiting for approval', approved: 'Approved', publishing: 'Publishing', published: 'Published', rejected: 'Not approved', failed: 'Needs attention', cancelled: 'Cancelled',
+  prompt_ready: 'Prompt ready', with_claude: 'Editing with Claude', completed: 'Ready to publish', publishing: 'Publishing', published: 'Published', cancelled: 'Cancelled',
 };
 
 /** Every video: the ones made in the Studio and the ones found on the platforms, each with all its posts. */
@@ -37,7 +36,8 @@ export default function ContentLibrary() {
           <Link key={c.id} to={`/content/${c.id}`} className="bg-white border border-stone-200 rounded-xl overflow-hidden hover:border-stone-400 transition flex">
             <div className="w-24 shrink-0 bg-stone-800 flex items-center justify-center text-stone-400 text-[10px]">
               {c.thumbnail_url ? <img src={c.thumbnail_url} alt="" className="h-full w-full object-cover" />
-                : c.studio?.cover ? <img src={`/api/studio/versions/${c.studio.cover}/preview/1`} alt="" className="h-full w-full object-cover object-top" /> : 'No picture'}
+                : c.studio?.has_thumb ? <img src={`/api/studio/jobs/${c.studio.id}/thumbnail?v=${c.studio.thumb_v}`} alt="" className="h-full w-full object-cover object-top" />
+                  : c.studio?.has_final ? <video src={`/api/studio/jobs/${c.studio.id}/final#t=1`} preload="metadata" muted className="h-full w-full object-cover object-top" /> : 'No picture'}
             </div>
             <div className="p-4 space-y-1.5 min-w-0 flex-1">
               <div className="flex items-center justify-between gap-2"><span className="text-xs text-ink-3 font-mono">{c.code}</span>

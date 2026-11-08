@@ -1,56 +1,66 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, can, useApi } from '../../lib';
+import { api, can, fmt, useApi, useOrigin, withOrigin } from '../../lib';
 import { Badge, Button, Card, Empty, ErrorBox, Loading, PageHeader, PlatformTag } from '../../components/ui';
 import { useMe } from '../../main';
+import { fmtMB, StatusBadge, THUMB_SOURCE } from './common';
 
+/** Every finished video: the ones in content_final waiting to be published, and the published ones. */
 export default function StudioCompleted() {
   const me = useMe();
-  const { data, reload } = useApi<any>('/api/studio/completed');
-  const [busy, setBusy] = useState<string | null>(null);
+  const origin = useOrigin();
+  const { data, reload } = useApi<any>(withOrigin('/api/studio/completed', origin), [origin]);
+  const [filter, setFilter] = useState<'ready' | 'published' | 'all'>('ready');
+  const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   if (!data) return <Loading />;
   const manage = can(me, 'studio.manage');
+  const items = data.items.filter((i: any) => filter === 'all' || (filter === 'ready' ? i.status !== 'published' : i.status === 'published'));
 
-  const run = async (key: string, fn: () => Promise<any>, ok: (r: any) => string) => {
-    setBusy(key); setErr(null); setMsg(null);
-    try { setMsg(ok(await fn())); } catch (e) { setErr((e as Error).message); }
-    setBusy(null); reload();
+  const scan = async () => {
+    setBusy(true); setErr(null); setMsg(null);
+    try {
+      const r = await api<any>('/api/studio/completed/scan', { method: 'POST' });
+      if (r.error) setErr(r.error);
+      else setMsg([...r.linked, ...r.imported].length ? `New in content_final: ${[...r.linked, ...r.imported].join(', ')}` : 'Checked: nothing new in content_final.');
+      reload();
+    } catch (e) { setErr((e as Error).message); }
+    setBusy(false);
   };
 
   return (
     <>
-      <PageHeader title="Completed videos" subtitle={data.folder ? <>Approved videos · stored in <b>{data.folder}</b></> : 'Connect Google Drive in Integrations to keep the final videos in content_final'}
-        actions={<>
-          {manage && data.not_in_drive > 0 && <Button variant="primary" disabled={!!busy} onClick={() => run('all', () => api('/api/studio/completed/sync', { method: 'POST' }),
-            (r) => `${r.sent.length ? `Sent to Google Drive: ${r.sent.join(', ')}.` : ''}${r.failed.length ? ` Could not send: ${r.failed.map((f: any) => `${f.code} (${f.error})`).join('; ')}` : ''}` || 'Nothing to send')}>
-            {busy === 'all' ? 'Sending…' : `Send ${data.not_in_drive} to Google Drive`}</Button>}
-          <Button onClick={reload}>Refresh</Button>
-        </>} />
+      <PageHeader title="Completed videos" subtitle={data.folder ? <>Finished videos from <b>{data.folder}</b>. Videos whose name starts with a job code (JOB-012 …) join their video; any other video is added as a new one.</> : 'Connect Google Drive in Integrations'}
+        actions={<>{manage && <Button variant="primary" disabled={busy} onClick={scan}>{busy ? 'Checking…' : 'Check content_final now'}</Button>}<Button onClick={reload}>Refresh</Button></>} />
       {msg && <div className="text-sm text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg p-2 mb-3">{msg}</div>}
-      <ErrorBox error={err ?? data.error} />
-      {!data.items.length ? (
-        <Card><Empty>No completed videos yet. When a version is approved, the final video goes to <b>content_final</b> and shows up here.</Empty></Card>
+      <ErrorBox error={err} />
+      <div className="flex gap-1 mb-4 text-sm">
+        {([['ready', 'Ready to publish'], ['published', 'Published'], ['all', 'All']] as const).map(([k, l]) => (
+          <button key={k} onClick={() => setFilter(k)} className={`px-3 py-1.5 rounded-lg border ${filter === k ? 'border-ink bg-ink text-white' : 'border-stone-200 text-ink-2 hover:border-stone-400'}`}>{l} ({data.items.filter((i: any) => k === 'all' || (k === 'ready' ? i.status !== 'published' : i.status === 'published')).length})</button>))}
+      </div>
+      {!items.length ? (
+        <Card><Empty>{filter === 'published' ? 'Nothing published yet.' : <>No finished videos waiting. When Claude's edit is approved, put the video in <b>content_final</b> (named with its job code) and it shows up here.</>}</Empty></Card>
       ) : (
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 mt-1">
-          {data.items.map((it: any) => (
-            <div key={it.key} className="bg-white border border-stone-200 rounded-xl overflow-hidden flex flex-col">
-              <video src={it.stream} controls preload="metadata" className="w-full aspect-[9/16] bg-black" />
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          {items.map((it: any) => (
+            <div key={it.id} className="bg-white border border-stone-200 rounded-xl overflow-hidden flex flex-col">
+              <video src={`/api/studio/jobs/${it.id}/final`} poster={it.has_cover ? `/api/studio/jobs/${it.id}/thumbnail?v=${it.cover_v}` : undefined} controls preload={it.has_cover ? 'none' : 'metadata'} className={`w-full bg-black ${it.options?.format === '16:9' ? 'aspect-video' : 'aspect-[9/16]'}`} />
               <div className="p-3 text-sm flex-1 flex flex-col gap-1.5">
-                <div className="font-semibold text-ink truncate" title={it.name}>{it.job?.title ?? it.name}</div>
-                {it.job && <div className="text-xs text-ink-2">{it.job.code} · {it.job.style_name}{it.job.approved_by_email ? ` · approved by ${it.job.approved_by_email}` : ''}</div>}
+                <div className="font-semibold text-ink truncate" title={it.final_name}>{it.title}</div>
+                <div className="text-xs text-ink-2"><span className="font-mono">{it.code}</span>{it.source !== 'content_final' && it.style_name ? ` · ${it.style_name}` : ' · added from content_final'}</div>
                 <div className="flex flex-wrap gap-1 items-center">
-                  {it.in_google ? <Badge color="green">In Google Drive</Badge> : <Badge color="amber">Not in Google Drive yet</Badge>}
-                  {(it.job?.published_on ?? []).map((p: string) => <span key={p} className="ml-1"><PlatformTag code={p} /></span>)}
+                  <StatusBadge s={it.status} />
+                  {it.final_captions ? <Badge color="gray">captions ✓</Badge> : null}
+                  {it.thumbnail_source ? <span title={THUMB_SOURCE[it.thumbnail_source]}><Badge color="gray">thumbnail ✓</Badge></span> : null}
+                  {(it.posts ?? []).filter((p: any) => p.status === 'published').map((p: any) => <span key={p.platform}><PlatformTag code={p.platform} /></span>)}
                 </div>
-                {it.job?.final_error && !it.in_google && <div className="text-[11px] text-red-700">{it.job.final_error}</div>}
-                <div className="text-[11px] text-ink-3">{it.modified ? new Date(it.modified).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : ''}{it.size ? ` · ${(it.size / 1e6).toFixed(1)} MB` : ''}</div>
+                {(it.posts ?? []).some((p: any) => ['failed', 'manual'].includes(p.status)) && <div className="text-[11px] text-amber-800">Some posts need attention (open the video).</div>}
+                <div className="text-[11px] text-ink-3">{fmt.dt(it.completed_at)}{it.final_size ? ` · ${fmtMB(it.final_size)}` : ''}</div>
                 <div className="mt-auto pt-2 flex flex-wrap gap-3 text-xs items-center">
-                  {it.job && <Link className="underline" to={`/studio/${it.job.id}`}>Open the video</Link>}
-                  {it.drive_link?.startsWith('http') && <a className="underline" href={it.drive_link} target="_blank" rel="noreferrer">Open in Drive</a>}
-                  <a className="underline" href={it.stream} download={it.name}>Download</a>
-                  {manage && it.can_send && it.job && <Button small variant="primary" disabled={!!busy} onClick={() => run(it.key, () => api(`/api/studio/jobs/${it.job.id}/deliver`, { method: 'POST' }), () => `${it.job.code} sent to Google Drive › content_final`)}>{busy === it.key ? 'Sending…' : 'Send to Drive'}</Button>}
+                  <Link className={it.status === 'completed' && manage ? 'bg-ink text-white rounded-md px-2.5 py-1 font-medium' : 'underline'} to={`/studio/${it.id}`}>{it.status === 'completed' && manage ? 'Publish →' : 'Open'}</Link>
+                  {it.final_drive_link && <a className="underline" href={it.final_drive_link} target="_blank" rel="noreferrer">Drive</a>}
+                  <a className="underline" href={`/api/studio/jobs/${it.id}/final?download=1`}>Download</a>
                 </div>
               </div>
             </div>))}

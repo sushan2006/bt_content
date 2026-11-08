@@ -1,4 +1,0 @@
-u2netp.onnx — U^2-Net (small) salient object detection (Qin et al., "U^2-Net: Going Deeper with Nested U-Structure for Salient Object Detection", Pattern Recognition 2020).
-Source: https://github.com/xuebinqin/U-2-Net  (ONNX export distributed by https://github.com/danielgatis/rembg)
-License: Apache License 2.0 — https://www.apache.org/licenses/LICENSE-2.0
-Used by studio/machine.py to cut machine photos out of their background.

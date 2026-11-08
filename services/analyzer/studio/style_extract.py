@@ -1,6 +1,6 @@
 """Learn an editing style from a reference video.
 
-Measures what a viewer notices about an edit and turns it into a style profile the planner can apply:
+Measures what a viewer notices about an edit; the report goes into the prompt so Claude can match the style:
   * rhythm: hard cuts per minute (frame-difference scene detection) and how long shots last
   * how much of the video is the speaker vs full-screen graphics / B-roll (face detection), and whether those
     graphics are light or dark
@@ -8,7 +8,7 @@ Measures what a viewer notices about an edit and turns it into a style profile t
   * captions: where they sit, how big they are, and the highlight colour (bright text detection)
   * sound: sound effects per minute (high-frequency transients) and how loud the music is under the voice
   * framing changes between shots (face size jumps = punch-ins)
-The closest built-in style is used as the base and the measured numbers are applied on top.
+Claude also watches the reference video itself (it is kept in Google Drive); these numbers make the match precise.
 """
 from __future__ import annotations
 
@@ -17,7 +17,27 @@ import subprocess
 
 import numpy as np
 
-from .render import FFMPEG, probe
+import json
+
+FFMPEG = os.environ.get("FFMPEG_BIN", "ffmpeg")
+FFPROBE = os.environ.get("FFPROBE_BIN", "ffprobe")
+
+
+def probe(path: str) -> dict:
+    r = subprocess.run([FFPROBE, "-v", "error", "-show_streams", "-show_format", "-of", "json", path], capture_output=True, text=True, timeout=600,
+                       encoding="utf-8", errors="replace")
+    if r.returncode != 0:
+        raise RuntimeError(f"ffprobe failed: {r.stderr.strip()[-600:]}")
+    info = json.loads(r.stdout)
+    v = next((x for x in info["streams"] if x.get("codec_type") == "video"), None)
+    w, h = (v or {}).get("width", 0), (v or {}).get("height", 0)
+    rot = 0
+    for sd in (v or {}).get("side_data_list", []) or []:
+        if "rotation" in sd:
+            rot = int(sd["rotation"])
+    if abs(rot) in (90, 270):
+        w, h = h, w
+    return {"duration": float(info["format"].get("duration", 0)), "width": w, "height": h}
 
 SR = 16000
 
@@ -173,34 +193,14 @@ def extract(path: str, name: str | None = None) -> dict:
     snd = _sound(_audio(path), dur)
     cut_every = dur / (len(cuts) + 1)
     graphics = 1 - face_ratio
-    # ---- closest base style
-    if pic["letterbox"] > 0 or (pic["teal_orange"] > 0.12 and cut_every > 3.0):
-        base = "cinematic"
-    elif graphics > 0.18 and theme in ("dark", "mixed", "light"):
-        base = "explainer3d"
-    elif cut_every < 2.4 and (snd["sfx_per_min"] > 12 or (cap and cap["height"] > 0.035)):
-        base = "hype"
-    else:
-        base = "minimal"
     grade = "teal_orange" if pic["teal_orange"] > 0.12 else "warm" if pic["warmth"] > 0.05 else "punchy" if pic["saturation"] > 0.42 and pic["contrast"] > 0.22 else "clean"
-    # kept on the light side: effects should support the voice, never compete with it
-    sfx_db = -12.0 if snd["sfx_per_min"] > 25 else -14.0 if snd["sfx_per_min"] > 12 else -17.0 if snd["sfx_per_min"] > 4 else -22.0
-    music_db = float(np.clip(-17 + (snd["music_rel_db"] + 30) * 0.25, -28, -16))
-    captions = {}
-    if cap:
-        big = cap["height"] > 0.032
-        captions = {"mode": "box" if (base == "hype" and cap["highlight"]) else "kinetic" if big else "subtle",
-                    "position": float(np.clip(cap["y"], 0.55, 0.86)), "highlight": cap["highlight"]}
-    params = {"cut_every": round(cut_every, 2), "grade": grade, "letterbox": pic["letterbox"], "grain": 0.08 if base == "cinematic" else 0.0,
-              "sfx_db": sfx_db, "music_db": round(music_db, 1), "captions": captions, "graphics_share": round(graphics, 2), "graphics_theme": theme,
-              "punch_strength": round(face_jump, 2)}
     summary = [f"Cuts every {cut_every:.1f} s ({len(cuts)} cuts in {dur:.0f} s)",
                f"{graphics * 100:.0f}% of the time is full-screen graphics or B-roll" + (f" ({theme} look)" if theme else ""),
                f"Picture: {grade.replace('_', '-')} grade, saturation {pic['saturation']:.2f}, contrast {pic['contrast']:.2f}" + (", letterbox bars" if pic["letterbox"] else ""),
                (f"Captions around {cap['y'] * 100:.0f}% down the frame, {'large' if cap['height'] > 0.032 else 'small'}" + (f", {cap['highlight_name']} highlight" if cap and cap['highlight_name'] else "")) if cap else "No burned-in captions detected",
                f"About {snd['sfx_per_min']:.0f} sound effects a minute; music {abs(snd['music_rel_db']):.0f} dB under the voice",
-               f"Closest built-in style: {base}"]
-    return {"name": name or os.path.splitext(os.path.basename(path))[0], "base": base, "params": params, "summary": "; ".join(summary[:3]),
+               f"Shot size changes (punch-ins) of about {face_jump * 100:.0f}% between frames" if face_jump > 0.05 else "Steady framing (few punch-ins)"]
+    return {"name": name or os.path.splitext(os.path.basename(path))[0], "summary": "; ".join(summary[:3]),
             "report": summary, "measured": {"duration": round(dur, 1), "cuts": [round(c, 2) for c in cuts], "face_ratio": round(face_ratio, 2), "picture": pic,
                                            "captions": cap, "sound": snd}}
 

@@ -1,7 +1,6 @@
 /**
- * Google Drive + Gmail for the Content Studio.
- *  - Drive: footage comes in through "01 Raw", edited versions go out to "03 Pending approval", shared view-only with approvers.
- *  - Gmail: suggestion requests and approval emails are sent from the connected mailbox; replies are read from the same thread.
+ * Google Drive for the Content Studio: the material for each video is kept there so Claude Code can reach it, and the
+ * finished videos are picked up from content_final. Without a Google account the same layout lives in a local folder.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -15,22 +14,19 @@ import { ApiError, request } from '../lib/http.js';
 
 export const WORKSPACE_SCOPES = [
   'https://www.googleapis.com/auth/drive',
-  // Gmail only when email review is wanted (WORKSPACE_GMAIL=1); approval happens in the dashboard by default
-  ...(process.env.WORKSPACE_GMAIL === '1' ? ['https://www.googleapis.com/auth/gmail.send', 'https://www.googleapis.com/auth/gmail.readonly'] : []),
   'openid', 'email', 'profile',
 ];
 
 /**
  * Folder layout in "Content Studio":
  *   content_raw      drop one folder per video here (the takes + optional brief.txt / script.txt / pictures)
- *   content_midway   the app's working area: one folder per job with the source takes and every rendered version for review
- *   suggestions      one text file per job listing the suggestions received and how each was used; a text file named
- *                    "<JOB code> ..." dropped here by anyone is read as a suggestion
- *   content_final    the approved video of each job; the dashboard shows these under Completed
+ *   content_midway   one folder per video ("JOB-012 Title") with its takes, voiceover and pictures, linked in the prompt for Claude
+ *   suggestions      one text file per video listing the suggestions; a text file named "<JOB code> ..." dropped here is read as a suggestion
+ *   content_final    the finished videos ("JOB-012 Title.mp4" + "JOB-012 captions.txt"); the dashboard lists them under Completed
  *   _assets          brand_kit, music_licensed, style_references, machines
  */
 export const FOLDER_NAMES: Record<string, string> = { raw: 'content_raw', midway: 'content_midway', suggestions: 'suggestions', final: 'content_final' };
-export const ASSET_FOLDERS: Record<string, string> = { brand: 'brand_kit', music: 'music_licensed', references: 'style_references', machines: 'machines', models: '3d_models' };
+export const ASSET_FOLDERS: Record<string, string> = { brand: 'brand_kit', music: 'music_licensed', references: 'style_references', machines: 'machines' };
 export const ROOT_FOLDER = 'Content Studio';
 
 export interface Workspace { id: string; email: string; folders: Record<string, string>; status: string; local?: boolean }
@@ -72,7 +68,7 @@ export async function saveWorkspace(email: string, name: string, refresh: string
 
 export async function workspaceToken(ws?: Workspace | null): Promise<string> {
   const w = ws ?? (await getWorkspace());
-  if (!w) throw new Error('Google Drive / Gmail is not connected (Integrations → Content Studio).');
+  if (!w) throw new Error('Google Drive is not connected (Integrations → Content Studio).');
   if (w.local) return 'local';
   const r = await one<any>('SELECT encrypted_refresh, encrypted_access, access_expires_at FROM workspace_connections WHERE id=$1', [w.id]);
   if (r.encrypted_access && r.access_expires_at && new Date(r.access_expires_at).getTime() - Date.now() > 120_000) return decrypt(r.encrypted_access);
@@ -87,7 +83,7 @@ export async function workspaceToken(ws?: Workspace | null): Promise<string> {
   } catch (e) {
     if (e instanceof ApiError && (e.body?.error === 'invalid_grant' || e.status === 400 || e.status === 401)) {
       await q(`UPDATE workspace_connections SET status='token_expired', last_error=$2 WHERE id=$1`, [w.id,
-        'Google refresh token rejected. If the OAuth app is in "Testing" mode tokens expire after 7 days. Reconnect Drive & Gmail.']);
+        'Google refresh token rejected. If the OAuth app is in "Testing" mode tokens expire after 7 days. Reconnect Google Drive.']);
     }
     throw e;
   }
@@ -97,7 +93,7 @@ const H = (t: string) => ({ authorization: `Bearer ${t}` });
 const DRIVE = 'https://www.googleapis.com/drive/v3';
 
 // ---------------------------------------------------------------- Drive
-export interface DriveFile { id: string; name: string; mimeType: string; md5Checksum?: string; size?: string; modifiedTime?: string; parents?: string[]; webViewLink?: string }
+export interface DriveFile { id: string; name: string; mimeType: string; md5Checksum?: string; size?: string; modifiedTime?: string; parents?: string[]; webViewLink?: string; thumbnailLink?: string }
 
 const MIME: Record<string, string> = { '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.m4v': 'video/mp4', '.mkv': 'video/x-matroska', '.webm': 'video/webm',
   '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.txt': 'text/plain', '.md': 'text/plain' };
@@ -117,7 +113,7 @@ export async function driveList(folderId: string, token: string): Promise<DriveF
   do {
     const u = new URL(`${DRIVE}/files`);
     u.searchParams.set('q', `'${folderId}' in parents and trashed = false`);
-    u.searchParams.set('fields', 'nextPageToken, files(id,name,mimeType,md5Checksum,size,modifiedTime,parents,webViewLink)');
+    u.searchParams.set('fields', 'nextPageToken, files(id,name,mimeType,md5Checksum,size,modifiedTime,parents,webViewLink,thumbnailLink)');
     u.searchParams.set('pageSize', '200');
     if (pageToken) u.searchParams.set('pageToken', pageToken);
     const r = await request<any>(u.toString(), { headers: H(token) });
@@ -171,7 +167,7 @@ export async function ensureFolders(ws: Workspace): Promise<Record<string, strin
 /** Folders of the current layout; older connections (01 Raw footage ...) are upgraded on first use. */
 export async function currentFolders(ws: Workspace): Promise<Record<string, string>> {
   if (ws.local) return localWorkspace().folders;
-  return ws.folders?.raw && ws.folders?.midway && ws.folders?.final && ws.folders?.suggestions && ws.folders?.models ? ws.folders : ensureFolders(ws);
+  return ws.folders?.raw && ws.folders?.midway && ws.folders?.final && ws.folders?.suggestions && ws.folders?.machines ? ws.folders : ensureFolders(ws);
 }
 
 export async function driveDownload(fileId: string, dest: string, token: string) {
@@ -207,27 +203,6 @@ export async function driveUpload(localPath: string, name: string, parent: strin
   const put = await fetch(location, { method: 'PUT', headers: { 'content-length': String(size), 'content-type': mimeType }, body: fs.createReadStream(localPath) as any, duplex: 'half' } as any);
   if (!put.ok) throw new Error(`Drive upload failed (${put.status}): ${(await put.text()).slice(0, 300)}`);
   return put.json() as any;
-}
-
-/** Copy a file inside Drive (no upload from this computer). */
-export async function driveCopy(fileId: string, name: string, parent: string, token: string): Promise<DriveFile> {
-  if (isLocal(token)) {
-    const dest = path.join(parent, name);
-    fs.copyFileSync(fileId, dest);
-    return { id: dest, name, mimeType: 'video/mp4', webViewLink: dest } as DriveFile;
-  }
-  const r = await fetch(`${DRIVE}/files/${fileId}/copy?fields=id,name,mimeType,webViewLink,size&supportsAllDrives=true`, {
-    method: 'POST', headers: { ...H(token), 'content-type': 'application/json' }, body: JSON.stringify({ name, parents: [parent] }) });
-  if (!r.ok) throw new Error(`Drive copy failed: HTTP ${r.status} ${(await r.text()).slice(0, 200)}`);
-  return r.json() as Promise<DriveFile>;
-}
-
-export async function driveShare(fileId: string, emails: string[], token: string) {
-  if (isLocal(token)) return;
-  for (const email of emails) {
-    await request(`${DRIVE}/files/${fileId}/permissions?sendNotificationEmail=false`, { method: 'POST', headers: H(token), body: { type: 'user', role: 'reader', emailAddress: email } })
-      .catch((e) => console.warn(`[drive] could not share with ${email}: ${(e as Error).message}`));
-  }
 }
 
 export async function driveMove(fileId: string, toFolder: string, token: string) {
@@ -275,71 +250,13 @@ export async function driveStream(fileId: string, token: string, range?: string)
   return { status: res.status, headers, body: Readable.fromWeb(res.body as any) };
 }
 
-// ---------------------------------------------------------------- Gmail
-const GMAIL = 'https://gmail.googleapis.com/gmail/v1/users/me';
-const b64url = (b: Buffer) => b.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-const encodeHeader = (s: string) => (/^[\x20-\x7e]*$/.test(s) ? s : `=?UTF-8?B?${Buffer.from(s).toString('base64')}?=`);
-
-export interface InlineImage { cid: string; path: string; mime?: string }
-
-export function buildMime(o: { from: string; to: string[]; subject: string; html: string; text: string; inReplyTo?: string; images?: InlineImage[] }): { raw: string; messageId: string } {
-  const boundary = `b_${Math.random().toString(36).slice(2)}`;
-  const alt = `a_${Math.random().toString(36).slice(2)}`;
-  const messageId = `<studio.${Date.now()}.${Math.random().toString(36).slice(2)}@content-studio>`;
-  const headers = [
-    `From: ${o.from}`, `To: ${o.to.join(', ')}`, `Subject: ${encodeHeader(o.subject)}`, 'MIME-Version: 1.0', `Message-ID: ${messageId}`,
-    ...(o.inReplyTo ? [`In-Reply-To: ${o.inReplyTo}`, `References: ${o.inReplyTo}`] : []),
-    `Content-Type: multipart/related; boundary="${boundary}"`,
-  ];
-  const parts = [
-    `--${boundary}`, `Content-Type: multipart/alternative; boundary="${alt}"`, '',
-    `--${alt}`, 'Content-Type: text/plain; charset="UTF-8"', 'Content-Transfer-Encoding: base64', '', Buffer.from(o.text).toString('base64'),
-    `--${alt}`, 'Content-Type: text/html; charset="UTF-8"', 'Content-Transfer-Encoding: base64', '', Buffer.from(o.html).toString('base64'),
-    `--${alt}--`,
-  ];
-  for (const img of o.images ?? []) {
-    if (!fs.existsSync(img.path)) continue;
-    parts.push(`--${boundary}`, `Content-Type: ${img.mime ?? 'image/jpeg'}`, 'Content-Transfer-Encoding: base64', `Content-ID: <${img.cid}>`,
-      `Content-Disposition: inline; filename="${img.cid}.jpg"`, '', fs.readFileSync(img.path).toString('base64'));
-  }
-  parts.push(`--${boundary}--`);
-  return { raw: b64url(Buffer.from([...headers, '', ...parts].join('\r\n'))), messageId };
-}
-
-export async function gmailSend(o: { to: string[]; subject: string; html: string; text: string; threadId?: string; inReplyTo?: string; images?: InlineImage[] }) {
-  const ws = await getWorkspace();
-  if (!ws || ws.local) throw new Error('Gmail is not connected (local Drive mode): review and approve in the app');
-  const token = await workspaceToken(ws);
-  const { raw, messageId } = buildMime({ ...o, from: ws.email });
-  const r = await request<any>(`${GMAIL}/messages/send`, { method: 'POST', headers: H(token), body: { raw, threadId: o.threadId } });
-  return { id: r.id as string, threadId: r.threadId as string, rfcMessageId: messageId };
-}
-
-function decodePart(data?: string) {
-  return data ? Buffer.from(data.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8') : '';
-}
-function textOf(payload: any): string {
-  if (!payload) return '';
-  if (payload.mimeType === 'text/plain' && payload.body?.data) return decodePart(payload.body.data);
-  for (const p of payload.parts ?? []) {
-    const t = textOf(p);
-    if (t) return t;
-  }
-  if (payload.mimeType === 'text/html' && payload.body?.data) return decodePart(payload.body.data).replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, ' ');
-  return '';
-}
-
-export interface ThreadMessage { id: string; from: string; fromEmail: string; date: Date; body: string }
-
-export async function gmailThread(threadId: string): Promise<ThreadMessage[]> {
-  const ws = await getWorkspace();
-  if (!ws || ws.local) return [];
-  const token = await workspaceToken(ws);
-  const r = await request<any>(`${GMAIL}/threads/${threadId}?format=full`, { headers: H(token) });
-  return (r.messages ?? []).map((m: any) => {
-    const hdr = (n: string) => (m.payload?.headers ?? []).find((h: any) => h.name.toLowerCase() === n)?.value ?? '';
-    const from = hdr('from');
-    const email = (from.match(/<([^>]+)>/)?.[1] ?? from).trim().toLowerCase();
-    return { id: m.id, from, fromEmail: email, date: new Date(Number(m.internalDate)), body: textOf(m.payload) };
-  });
+/** Downloads Drive's own preview image of a file (videos get one once Drive has processed them), at up to `size` px. */
+export async function driveThumbnail(f: DriveFile, dest: string, token: string, size = 1280): Promise<boolean> {
+  if (isLocal(token) || !f.thumbnailLink) return false;
+  const url = f.thumbnailLink.replace(/=s\d+$/, `=s${size}`);
+  const res = await fetch(url, { headers: H(token) }).catch(() => null);
+  if (!res?.ok || !res.body) return false;
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  await pipeline(Readable.fromWeb(res.body as any), fs.createWriteStream(dest));
+  return true;
 }

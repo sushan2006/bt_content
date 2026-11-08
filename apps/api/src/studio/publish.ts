@@ -1,12 +1,15 @@
 /**
- * Publishing approved versions.
+ * Publishing a finished video (from Google Drive › content_final, or uploaded on the video page).
  *  Instagram  Reels via the Content Publishing API (resumable upload -> container -> media_publish)
  *  Facebook   Page Reels (start -> upload -> finish)
  *  YouTube    resumable videos.insert (a 9:16 video under 3 minutes becomes a Short)
- * Every published post is stored as a platform publication linked to the job's content item, so Phase 1 measures it.
- * When an API cannot do it (no connected account, missing permission, unaudited YouTube project...) the job is marked
- * "manual" with the reason, and the file stays ready to post by hand.
+ * The captions are written in the dashboard (pre-filled from "<JOB> captions.txt"). Every post is stored as a platform
+ * publication linked to the video's content item, so the analytics measure it. When an API cannot post (no connected
+ * account, missing permission, unaudited YouTube project...) the post is marked "post by hand" with the reason.
+ * The video's thumbnail goes with every post: Instagram's cover (cover_url when this server is reachable from the
+ * internet, otherwise the frame offset), Facebook's preferred thumbnail, and YouTube's custom thumbnail.
  */
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { env } from '../config.js';
@@ -16,58 +19,30 @@ import { googleAccessToken, metaToken } from '../integrations/tokens.js';
 import { ApiError, request, sleep } from '../lib/http.js';
 import { enqueue } from '../jobs/queue.js';
 import { assignPublicationCode } from '../routes/content.js';
-import { getWorkspace, gmailSend, driveMove, workspaceToken } from '../integrations/workspace.js';
-import { publishedEmail } from './emails.js';
-import { ensureVersionLocal, planInputs, renderVersion, studioSettings } from './pipeline.js';
-import { styleRequest } from './styles.js';
-import { studio } from './studioClient.js';
+import { ensureFinalLocal, studioSettings } from './pipeline.js';
 
-const FORMAT = { instagram: 'reel', facebook: 'reel', youtube: 'short' } as const;
+export interface PostRequest { platform: 'instagram' | 'facebook' | 'youtube'; caption: string; title?: string | null; tags?: string[] }
 
-function captionFor(platform: string, plan: any) {
-  const md = plan?.metadata ?? {};
-  if (platform === 'instagram') return { caption: md.instagram?.caption ?? '' };
-  if (platform === 'facebook') return { caption: md.facebook?.description ?? '' };
-  return { title: md.youtube?.title ?? plan?.title ?? 'New video', caption: md.youtube?.description ?? '', tags: md.youtube?.tags ?? [] };
-}
+const formatFor = (platform: string, job: any) => (platform === 'youtube' ? (job.options?.format === '16:9' ? 'video' : 'short') : 'reel');
 
-export async function schedulePublishing(job: any) {
-  const settings = await studioSettings();
-  const ver = await one<any>(`SELECT * FROM production_versions WHERE job_id=$1 AND revision=$2 AND variant=$3 AND aspect='9:16'`, [job.id, job.revision, job.approved_variant]);
-  if (!ver) throw new Error('Approved version not found');
-  let ytVersion = ver;
-  // optional landscape YouTube video from landscape footage
-  if (job.brief?.youtube_landscape && job.platforms.includes('youtube')) {
-    const takes = job.analysis?.takes ?? [];
-    const landscape = (await q<any>(`SELECT width, height FROM production_files WHERE job_id=$1 AND kind='take'`, [job.id])).length && takes.length;
-    if (landscape) {
-      const { inputs } = await planInputs(job);
-      const sr = await styleRequest(job.approved_variant);
-      const out = await studio.plan({ inputs: { ...inputs, style_profile: sr.style_profile }, variant: sr.variant, aspect: '16:9', overrides: job.overrides ?? [], use_llm: true });
-      const v169 = await one<any>(`INSERT INTO production_versions (job_id, revision, variant, aspect, label, plan, summary, status) VALUES ($1,$2,$3,'16:9',$4,$5,$6,'planned')
-                                   ON CONFLICT (job_id, revision, variant, aspect) DO UPDATE SET plan=EXCLUDED.plan, summary=EXCLUDED.summary RETURNING *`,
-        [job.id, job.revision, job.approved_variant, ver.label, JSON.stringify(out.plan), JSON.stringify(out.summary)]);
-      await q(`UPDATE production_jobs SET status_detail='Rendering the landscape YouTube version' WHERE id=$1`, [job.id]);
-      ytVersion = await renderVersion(job, v169);
-    }
-  }
-  const when = job.publish_at ? new Date(job.publish_at) : new Date();
-  for (const platform of job.platforms as string[]) {
-    if (!['instagram', 'facebook', 'youtube'].includes(platform)) continue;
-    const acc = await one<any>(`SELECT id FROM social_accounts WHERE platform_code=$1 AND status='connected' AND data_origin='live' ORDER BY created_at LIMIT 1`, [platform]);
-    const v = platform === 'youtube' ? ytVersion : ver;
-    const meta = captionFor(platform, v.plan);
-    const format = platform === 'youtube' && v.aspect === '16:9' ? 'video' : FORMAT[platform as keyof typeof FORMAT];
-    const manual = !acc || settings.auto_publish_after_approval === false || job.data_origin === 'demo';
-    const reason = job.data_origin === 'demo' ? 'Demo job: not published to real accounts' : !acc ? `No ${platform} account connected` : settings.auto_publish_after_approval === false ? 'Automatic publishing is switched off in Studio settings' : null;
-    await q(`INSERT INTO publish_jobs (job_id, version_id, platform_code, social_account_id, format, scheduled_at, status, title, caption, error)
+export async function schedulePublishing(job: any, posts: PostRequest[], publishAt: Date | null) {
+  if (!job.final_drive_file_id && !job.final_path) throw new Error('This video has no finished file yet.');
+  if (!posts.length) throw new Error('Pick at least one platform.');
+  const when = publishAt ?? new Date();
+  for (const p of posts) {
+    const acc = await one<any>(`SELECT id FROM social_accounts WHERE platform_code=$1 AND status='connected' AND data_origin='live' ORDER BY created_at LIMIT 1`, [p.platform]);
+    const manual = !acc || job.data_origin === 'demo';
+    const reason = job.data_origin === 'demo' ? 'Demo video: not posted to real accounts' : !acc ? `No ${p.platform} account is connected (Integrations). Post it by hand.` : null;
+    await q(`INSERT INTO publish_jobs (job_id, platform_code, social_account_id, format, scheduled_at, status, title, caption, tags, error)
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-             ON CONFLICT (job_id, platform_code, format) DO UPDATE SET version_id=EXCLUDED.version_id, scheduled_at=EXCLUDED.scheduled_at, status=EXCLUDED.status,
-               title=EXCLUDED.title, caption=EXCLUDED.caption, error=EXCLUDED.error, updated_at=now()`,
-      [job.id, v.id, platform, acc?.id ?? null, format, when, manual ? 'manual' : 'scheduled', meta.title ?? null, meta.caption ?? '', reason]);
+             ON CONFLICT (job_id, platform_code, format) DO UPDATE SET social_account_id=EXCLUDED.social_account_id, scheduled_at=EXCLUDED.scheduled_at, status=EXCLUDED.status,
+               title=EXCLUDED.title, caption=EXCLUDED.caption, tags=EXCLUDED.tags, error=EXCLUDED.error, attempts=0, updated_at=now()
+             WHERE publish_jobs.status NOT IN ('published', 'uploading', 'processing')`,
+      [job.id, p.platform, acc?.id ?? null, formatFor(p.platform, job), when, manual ? 'manual' : 'scheduled', p.title ?? null, p.caption ?? '', p.tags ?? [], reason]);
   }
-  await q(`UPDATE production_jobs SET status='publishing', status_detail=$2, updated_at=now() WHERE id=$1`,
-    [job.id, when.getTime() > Date.now() + 60_000 ? `Scheduled for ${when.toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}` : 'Publishing now']);
+  await q(`UPDATE production_jobs SET status='publishing', platforms=$3, publish_at=$4, status_detail=$2, updated_at=now() WHERE id=$1`,
+    [job.id, when.getTime() > Date.now() + 60_000 ? `Scheduled for ${when.toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}` : 'Publishing now',
+     posts.map((p) => p.platform), when]);
   setImmediate(() => runDuePublishing().catch(console.error));
 }
 
@@ -80,7 +55,7 @@ export async function runDuePublishing() {
     busy.add(pj.id);
     try { await publishOne(pj); } finally { busy.delete(pj.id); }
   }
-  // finish jobs whose platform posts are all done
+  // finish videos whose posts are all done
   const jobs = await q<any>(`SELECT j.* FROM production_jobs j WHERE j.status='publishing' AND NOT EXISTS (SELECT 1 FROM publish_jobs p WHERE p.job_id=j.id AND p.status IN ('scheduled','uploading','processing'))`);
   for (const j of jobs) await finishJob(j);
 }
@@ -98,11 +73,30 @@ async function rupload(url: string, token: string, file: string, extraHeaders: R
   return body ? JSON.parse(body) : {};
 }
 
-async function publishInstagram(pj: any, file: string) {
+/** A signed, unguessable link to a video's thumbnail, so Instagram can fetch the cover. */
+export function coverSignature(jobId: string, version: string) {
+  return crypto.createHmac('sha256', env.JWT_SECRET).update(`${jobId}:${version}`).digest('hex').slice(0, 32);
+}
+function publicCoverUrl(job: any): string | null {
+  const base = env.API_PUBLIC_URL.replace(/\/$/, '');
+  if (!job.thumbnail_path || !/^https:\/\//i.test(base) || /localhost|127\.0\.0\.1|\.local\b|\/\/(10|192\.168|172\.(1[6-9]|2\d|3[01]))\./i.test(base)) return null;
+  const v = String(new Date(job.thumbnail_updated_at ?? 0).getTime());
+  return `${base}/api/public/covers/${job.id}/${v}/${coverSignature(job.id, v)}.jpg`;
+}
+async function setThumbStatus(pjId: string, status: string) {
+  await q(`UPDATE publish_jobs SET thumbnail_status=$2, updated_at=now() WHERE id=$1`, [pjId, status.slice(0, 300)]);
+  await log(pjId, `thumbnail: ${status}`);
+}
+
+async function publishInstagram(pj: any, file: string, job: any) {
   const acc = await one<any>('SELECT external_account_id FROM social_accounts WHERE id=$1', [pj.social_account_id]);
   const token = await metaToken(pj.social_account_id);
   const ig = acc.external_account_id;
-  const c = await request<any>(`${graphBase()}/${ig}/media`, { method: 'POST', retries: 1, form: { media_type: 'REELS', upload_type: 'resumable', caption: pj.caption ?? '', share_to_feed: 'true', access_token: token } });
+  const cover = publicCoverUrl(job);
+  const thumb: Record<string, string> = cover ? { cover_url: cover } : job.thumbnail_time != null ? { thumb_offset: String(Math.round(Number(job.thumbnail_time) * 1000)) } : {};
+  const c = await request<any>(`${graphBase()}/${ig}/media`, { method: 'POST', retries: 1, form: { media_type: 'REELS', upload_type: 'resumable', caption: pj.caption ?? '', share_to_feed: 'true', ...thumb, access_token: token } });
+  await setThumbStatus(pj.id, cover ? 'cover sent with the reel' : thumb.thumb_offset ? `frame at ${job.thumbnail_time} s used as the cover` :
+    job.thumbnail_path ? 'not sent: Instagram needs the cover at a public https address (set API_PUBLIC_URL to the server\'s public https address); Instagram picks a frame' : 'no thumbnail');
   await log(pj.id, `container ${c.id} created`);
   await rupload(`https://rupload.facebook.com/ig-api-upload/${env.META_GRAPH_VERSION}/${c.id}`, token, file);
   await q(`UPDATE publish_jobs SET status='processing' WHERE id=$1`, [pj.id]);
@@ -140,7 +134,7 @@ async function publishFacebook(pj: any, file: string) {
 async function publishYouTube(pj: any, file: string, privacy: string) {
   const token = await googleAccessToken(pj.social_account_id);
   const size = fs.statSync(file).size;
-  const meta = { snippet: { title: (pj.title ?? 'New video').slice(0, 100), description: pj.caption ?? '', categoryId: '28' },
+  const meta = { snippet: { title: (pj.title || 'New video').slice(0, 100), description: pj.caption ?? '', tags: (pj.tags ?? []).slice(0, 30), categoryId: '28' },
     status: { privacyStatus: privacy, selfDeclaredMadeForKids: false } };
   const init = await fetch('https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status', {
     method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json; charset=UTF-8', 'x-upload-content-length': String(size), 'x-upload-content-type': 'video/mp4' },
@@ -148,7 +142,7 @@ async function publishYouTube(pj: any, file: string, privacy: string) {
   });
   if (!init.ok) {
     const t = await init.text();
-    if (init.status === 403 && /insufficient|scope/i.test(t)) throw new Error('YouTube upload permission missing: reconnect YouTube in Integrations (the upload permission was added for Phase 2).');
+    if (init.status === 403 && /insufficient|scope/i.test(t)) throw new Error('YouTube upload permission missing: reconnect YouTube in Integrations.');
     throw new Error(`YouTube upload could not start (${init.status}): ${t.slice(0, 300)}`);
   }
   const put = await fetch(init.headers.get('location')!, { method: 'PUT', headers: { 'content-length': String(size), 'content-type': 'video/mp4' }, body: fs.createReadStream(file) as any, duplex: 'half' } as any);
@@ -158,33 +152,62 @@ async function publishYouTube(pj: any, file: string, privacy: string) {
   return { id, permalink: pj.format === 'short' ? `https://www.youtube.com/shorts/${id}` : `https://www.youtube.com/watch?v=${id}` };
 }
 
+/** Facebook: the thumbnail becomes the reel's preferred thumbnail. */
+async function facebookThumbnail(pj: any, job: any, videoId: string) {
+  if (!job.thumbnail_path || !fs.existsSync(job.thumbnail_path)) return setThumbStatus(pj.id, 'no thumbnail');
+  const token = await metaToken(pj.social_account_id);
+  const fd = new FormData();
+  fd.append('access_token', token);
+  fd.append('is_preferred', 'true');
+  fd.append('source', new Blob([fs.readFileSync(job.thumbnail_path)], { type: 'image/jpeg' }), 'thumbnail.jpg');
+  const r = await fetch(`${graphBase()}/${videoId}/thumbnails`, { method: 'POST', body: fd });
+  await setThumbStatus(pj.id, r.ok ? 'set as the preferred thumbnail' : `not set (${r.status}: ${(await r.text()).slice(0, 160)})`);
+}
+
+/** YouTube: custom thumbnail once the upload has been processed (needs a verified channel). */
+async function youtubeThumbnail(pj: any, job: any, videoId: string) {
+  if (!job.thumbnail_path || !fs.existsSync(job.thumbnail_path)) return setThumbStatus(pj.id, 'no thumbnail');
+  const token = await googleAccessToken(pj.social_account_id);
+  for (let i = 0; i < 30; i++) {   // wait for processing (up to about 5 minutes)
+    const v = await request<any>(`https://www.googleapis.com/youtube/v3/videos?part=processingDetails&id=${videoId}`, { headers: { authorization: `Bearer ${token}` } }).catch(() => null);
+    const st = v?.items?.[0]?.processingDetails?.processingStatus;
+    if (st === 'succeeded' || st === 'failed' || st === 'terminated') break;
+    await sleep(10_000);
+  }
+  const r = await fetch(`https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=${videoId}&uploadType=media`, {
+    method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'image/jpeg' }, body: fs.readFileSync(job.thumbnail_path) });
+  const t = r.ok ? '' : await r.text();
+  await setThumbStatus(pj.id, r.ok ? 'set as the custom thumbnail' : /forbidden|verif/i.test(t) ? 'not set: custom thumbnails need a verified YouTube channel (youtube.com/verify)' : `not set (${r.status}: ${t.slice(0, 160)})`);
+}
+
 async function publishOne(pj: any) {
   const settings = await studioSettings();
-  const ver = await one<any>('SELECT * FROM production_versions WHERE id=$1', [pj.version_id]);
   const job = await one<any>('SELECT * FROM production_jobs WHERE id=$1', [pj.job_id]);
-  // in Drive storage mode the local copy is removed after upload: fetch it back for the platform upload
-  const file = await ensureVersionLocal(job, ver).catch(() => null);
+  // the finished video lives in Google Drive: fetch it for the platform upload
+  const file = await ensureFinalLocal(job).catch(() => null);
   if (!file) {
-    await q(`UPDATE publish_jobs SET status='failed', error='The rendered file is missing on this computer and in Google Drive' WHERE id=$1`, [pj.id]);
+    await q(`UPDATE publish_jobs SET status='failed', error='The finished video could not be found on this computer or in Google Drive' WHERE id=$1`, [pj.id]);
     return;
   }
-  ver.output_path = file;
   await q(`UPDATE publish_jobs SET status='uploading', attempts=attempts+1, error=NULL, updated_at=now() WHERE id=$1`, [pj.id]);
   try {
     let res: { id: string; permalink: string | null };
-    if (pj.platform_code === 'instagram') res = await publishInstagram(pj, ver.output_path);
-    else if (pj.platform_code === 'facebook') res = await publishFacebook(pj, ver.output_path);
-    else res = await publishYouTube(pj, ver.output_path, settings.youtube_privacy ?? 'private');
+    if (pj.platform_code === 'instagram') res = await publishInstagram(pj, file, job);
+    else if (pj.platform_code === 'facebook') res = await publishFacebook(pj, file);
+    else res = await publishYouTube(pj, file, settings.youtube_privacy ?? 'private');
     const pub = await one<any>(
-      `INSERT INTO platform_publications (content_item_id, social_account_id, platform_code, platform_post_id, platform_video_id, format, title, caption, permalink, duration_sec, published_at, publishing_status, raw)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now(),'published',$11)
+      `INSERT INTO platform_publications (content_item_id, social_account_id, platform_code, platform_post_id, platform_video_id, format, title, caption, permalink, published_at, publishing_status, raw)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,now(),'published',$10)
        ON CONFLICT (platform_code, platform_post_id) DO UPDATE SET content_item_id=EXCLUDED.content_item_id, permalink=coalesce(EXCLUDED.permalink, platform_publications.permalink)
        RETURNING id`,
-      [job.content_item_id, pj.social_account_id, pj.platform_code, res.id, pj.platform_code === 'facebook' ? res.id : null, pj.format, pj.title ?? job.title, pj.caption ?? null,
-       res.permalink, ver.qc?.duration ?? null, JSON.stringify({ studio_job: job.code, version: ver.label })]);
+      [job.content_item_id, pj.social_account_id, pj.platform_code, res.id, pj.platform_code === 'facebook' ? res.id : null, pj.format, pj.title || job.title, pj.caption ?? null,
+       res.permalink, JSON.stringify({ studio_job: job.code })]);
     await assignPublicationCode(pub.id);
     await q(`UPDATE publish_jobs SET status='published', external_id=$2, permalink=$3, publication_id=$4, updated_at=now() WHERE id=$1`, [pj.id, res.id, res.permalink, pub.id]);
     await log(pj.id, `published ${res.permalink ?? res.id}`);
+    // the thumbnail is set afterwards in the background, so a thumbnail problem never holds up or fails the post
+    if (pj.platform_code === 'facebook') setImmediate(() => facebookThumbnail(pj, job, res.id).catch((e) => setThumbStatus(pj.id, `not set: ${(e as Error).message}`)));
+    if (pj.platform_code === 'youtube') setImmediate(() => youtubeThumbnail(pj, job, res.id).catch((e) => setThumbStatus(pj.id, `not set: ${(e as Error).message}`)));
   } catch (e) {
     const msg = (e as Error).message;
     const permanent = e instanceof ApiError ? [400, 403].includes(e.status) : /permission|missing|scope|not connected/i.test(msg);
@@ -196,34 +219,27 @@ async function publishOne(pj: any) {
 }
 
 async function finishJob(job: any) {
-  const pjs = await q<any>(`SELECT * FROM publish_jobs WHERE job_id=$1`, [job.id]);
+  const pjs = await q<any>(`SELECT * FROM publish_jobs WHERE job_id=$1 AND status <> 'cancelled'`, [job.id]);
   const done = pjs.filter((p) => p.status === 'published');
   const manual = pjs.filter((p) => p.status === 'manual' || p.status === 'failed');
   await q(`UPDATE production_jobs SET status='published', status_detail=$2, updated_at=now() WHERE id=$1`, [job.id,
     `${done.length ? `Published on ${done.map((p) => p.platform_code).join(', ')}` : 'Ready to post by hand'}${manual.length && done.length ? `; to post by hand: ${manual.map((p) => p.platform_code).join(', ')}` : ''}`]);
-  // close the loop: features for the engine + analyse the final video like any other
-  const ver = await one<any>(`SELECT * FROM production_versions WHERE job_id=$1 AND revision=$2 AND variant=$3 AND aspect='9:16'`, [job.id, job.revision, job.approved_variant]);
-  const file = ver ? await ensureVersionLocal(job, ver).catch(() => null) : null;
-  if (job.content_item_id && ver) {
-    // the style as the analysis engine sees it: a built-in style key, or ref_<name> for a style learned from a reference video
-    const style = String(job.approved_variant ?? '').startsWith('profile:')
-      ? `ref_${(await one<any>('SELECT name FROM style_profiles WHERE id=$1', [String(job.approved_variant).slice(8)]))?.name ?? 'custom'}`.toLowerCase().replace(/[^a-z0-9]+/g, '_').slice(0, 40)
-      : job.approved_variant;
-    for (const [k, v] of [['edit_style', style], ['ai_edited', 'yes']]) {
-      await q(`INSERT INTO content_features (content_item_id, feature_key, value_text, source, confidence) VALUES ($1,$2,$3,'platform',1)
-               ON CONFLICT (content_item_id, feature_key) DO UPDATE SET value_text=EXCLUDED.value_text, updated_at=now() WHERE content_features.source <> 'human'`, [job.content_item_id, k, v]);
-    }
-    if (file) {
-      const asset = await one<any>(`INSERT INTO content_assets (content_item_id, asset_type, storage_uri, mime_type, size_bytes, checksum_sha256)
-                                    VALUES ($1,'master_video',$2,'video/mp4',$3,$4) ON CONFLICT (content_item_id, checksum_sha256) DO NOTHING RETURNING id`,
-        [job.content_item_id, pathToFileURL(file).toString(), fs.statSync(file).size, `studio:${ver.id}`]);
-      if (asset && job.data_origin !== 'demo') await enqueue('analyze-video', { contentItemId: job.content_item_id, assetId: asset.id });
-    }
+  if (!job.content_item_id) return;
+  // close the loop: the style the video was made in becomes a feature the analytics engine can compare
+  const key = job.styles?.[0] ?? null;
+  const style = !key ? null : key.startsWith('profile:')
+    ? `ref_${(await one<any>('SELECT name FROM style_profiles WHERE id=$1', [key.slice(8)]))?.name ?? 'custom'}`.toLowerCase().replace(/[^a-z0-9]+/g, '_').slice(0, 40)
+    : key;
+  const features: [string, string][] = [['ai_edited', 'yes'], ...(style ? [['edit_style', style] as [string, string]] : [])];
+  for (const [k, v] of features) {
+    await q(`INSERT INTO content_features (content_item_id, feature_key, value_text, source, confidence) VALUES ($1,$2,$3,'platform',1)
+             ON CONFLICT (content_item_id, feature_key) DO UPDATE SET value_text=EXCLUDED.value_text, updated_at=now() WHERE content_features.source <> 'human'`, [job.content_item_id, k, v]);
   }
-  const ws = await getWorkspace();
-  const settings = await studioSettings();
-  if (ws && !ws.local && (settings.approver_emails ?? []).length && done.length) {
-    const mail = publishedEmail({ code: job.code, title: job.title, links: pjs.map((p) => ({ platform: p.platform_code, url: p.permalink, status: p.status })) });
-    await gmailSend({ to: settings.approver_emails, ...mail }).catch(() => {});
-  }
+  if (job.data_origin === 'demo' || !done.length) return;
+  const file = await ensureFinalLocal(job).catch(() => null);
+  if (!file) return;
+  const asset = await one<any>(`INSERT INTO content_assets (content_item_id, asset_type, storage_uri, mime_type, size_bytes, checksum_sha256)
+                                VALUES ($1,'master_video',$2,'video/mp4',$3,$4) ON CONFLICT (content_item_id, checksum_sha256) DO NOTHING RETURNING id`,
+    [job.content_item_id, pathToFileURL(file).toString(), fs.statSync(file).size, `studio:${job.final_drive_file_id ?? job.id}`]);
+  if (asset) await enqueue('analyze-video', { contentItemId: job.content_item_id, assetId: asset.id });
 }

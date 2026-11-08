@@ -69,21 +69,21 @@ export default function Integrations() {
         )}
 
         {manage && (
-          <Card title="Content Studio: Google Drive & Gmail" subtitle="Footage comes in through Drive, edited versions go to approvers by email, and replies are read automatically. Can be a different Google account from the YouTube channel.">
+          <Card title="Content Studio: Google Drive" subtitle="Footage, pictures and reference videos are kept in Drive so Claude can reach them, and finished videos are picked up from content_final. Can be a different Google account from the YouTube channel.">
             {studio?.workspace ? (
               <div className="flex flex-wrap items-center gap-3 text-sm">
                 <Badge color={studio.workspace.status === 'connected' ? 'green' : 'red'}>{studio.workspace.status === 'connected' ? '✓ Connected' : '✕ Reconnect required'}</Badge>
                 <span>{studio.workspace.email}</span>
                 {studio.workspace.folders?.root && <a className="underline text-xs" target="_blank" href={`https://drive.google.com/drive/folders/${studio.workspace.folders.root}`}>Open "Content Studio" folder</a>}
                 <span className="text-xs text-ink-3">Last Drive check {fmt.ago(studio.workspace.last_scan_at)}</span>
-                <Button small onClick={async () => { const r = await api('/api/studio/drive/scan', { method: 'POST' }); setMsg(r.created?.length ? `New videos from Drive: ${r.created.join(', ')}` : 'Drive checked: no new folders.'); }}>Check Drive now</Button>
+                <Button small onClick={async () => { const r = await api('/api/studio/drive/scan', { method: 'POST' }); const found = [...(r.raw?.created ?? []), ...(r.final?.linked ?? []), ...(r.final?.imported ?? [])]; setMsg(found.length ? `Found in Drive: ${found.join(', ')}` : 'Drive checked: nothing new in content_raw or content_final.'); }}>Check Drive now</Button>
                 <Button small variant="primary" href="/api/integrations/workspace/start">Reconnect</Button>
-                <Button small variant="danger" onClick={async () => { if (confirm('Disconnect Drive & Gmail?')) { await api('/api/integrations/workspace', { method: 'DELETE' }); location.reload(); } }}>Disconnect</Button>
+                <Button small variant="danger" onClick={async () => { if (confirm('Disconnect Google Drive?')) { await api('/api/integrations/workspace', { method: 'DELETE' }); location.reload(); } }}>Disconnect</Button>
                 {studio.workspace.last_error && <div className="w-full text-xs text-red-700">{studio.workspace.last_error}</div>}
               </div>
             ) : !data.configured.google ? <div className="text-sm bg-amber-50 border border-amber-200 rounded-lg p-3">Add <code>GOOGLE_CLIENT_ID</code> and <code>GOOGLE_CLIENT_SECRET</code> to <code>.env</code> first (same Google Cloud project as YouTube).</div>
-              : <><Button variant="primary" href="/api/integrations/workspace/start">Connect Google Drive & Gmail</Button>
-                <div className="text-xs text-ink-2 mt-2">Creates the folder <b>Content Studio</b> in your Drive with: 01 Raw footage, 02 Working, 03 Pending approval, 04 Approved, 05 Published, Brand kit, Music, Reference videos.</div></>}
+              : <><Button variant="primary" href="/api/integrations/workspace/start">Connect Google Drive</Button>
+                <div className="text-xs text-ink-2 mt-2">Uses your folders <b>content_raw</b> and <b>content_final</b> in My Drive when they exist; otherwise creates <b>Content Studio</b> with content_raw, content_midway (one folder per video), suggestions, content_final and _assets (brand kit, music, reference videos, machines).</div></>}
             <div className="text-[11px] text-ink-3 mt-3">Authorised redirect URI to add in Google Cloud: <code>{data.redirect_uris.google.replace('/google/callback', '/workspace/callback')}</code></div>
           </Card>
         )}
@@ -101,8 +101,8 @@ export default function Integrations() {
         {health && <Card title="System health"><div className="flex flex-wrap gap-2 text-xs">
           <Badge color={health.db ? 'green' : 'red'}>Database {health.db ? 'ok' : 'down'}</Badge>
           <Badge color={health.analyzer?.ok ? 'green' : 'red'}>Video analyzer {health.analyzer?.ok ? 'ok' : 'unreachable'}</Badge>
-          {health.analyzer?.ok && <><Badge color={health.analyzer.whisper ? 'green' : 'amber'}>Speech-to-text {health.analyzer.whisper ? `whisper (${health.analyzer.whisper_model})` : 'not installed'}</Badge><Badge color={health.analyzer.ocr ? 'green' : 'gray'}>OCR {health.analyzer.ocr ? 'on' : 'off'}</Badge><Badge color={health.analyzer.vision_llm ? 'green' : 'gray'}>Vision model {health.analyzer.vision_llm ? 'on' : 'off'}</Badge></>}
-          <Badge>{health.redis}</Badge><Badge color={health.llm_narrative ? 'green' : 'gray'}>AI narrative {health.llm_narrative ? 'on' : 'templates'}</Badge>
+          {health.analyzer?.ok && <><Badge color={health.analyzer.whisper ? 'green' : 'amber'}>Speech-to-text {health.analyzer.whisper ? `whisper (${health.analyzer.whisper_model})` : 'not installed'}</Badge><Badge color={health.analyzer.ocr ? 'green' : 'gray'}>OCR {health.analyzer.ocr ? 'on' : 'off'}</Badge></>}
+          <Badge>{health.redis}</Badge>
         </div></Card>}
       </div>
     </>
