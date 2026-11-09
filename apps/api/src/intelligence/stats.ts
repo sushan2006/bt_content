@@ -113,3 +113,45 @@ export function confidenceFor(nA: number, nB: number, p: number, delta: number, 
   if (n >= s.min_sample_moderate && Math.min(nA, nB) >= 3 && p < s.alpha && Math.abs(delta) >= 0.147) return 'moderate';
   return 'preliminary';
 }
+
+/**
+ * Mann–Kendall trend test: is there a steady rise or fall over time? Rank-based, so one viral video does not decide it.
+ * Normal approximation with tie correction; `tau` is Kendall's tau in [-1, 1].
+ */
+export function mannKendall(y: number[]) {
+  const n = y.length;
+  if (n < 3) return { s: 0, z: 0, p: 1, tau: 0 };
+  let s = 0;
+  for (let i = 0; i < n - 1; i++) for (let j = i + 1; j < n; j++) s += Math.sign(y[j] - y[i]);
+  const counts = new Map<number, number>();
+  for (const v of y) counts.set(v, (counts.get(v) ?? 0) + 1);
+  let ties = 0;
+  for (const t of counts.values()) if (t > 1) ties += t * (t - 1) * (2 * t + 5);
+  const varS = (n * (n - 1) * (2 * n + 5) - ties) / 18;
+  const z = varS <= 0 ? 0 : s > 0 ? (s - 1) / Math.sqrt(varS) : s < 0 ? (s + 1) / Math.sqrt(varS) : 0;
+  return { s, z, p: Math.min(1, 2 * (1 - normCdf(Math.abs(z)))), tau: s / ((n * (n - 1)) / 2) };
+}
+
+/** Theil–Sen line: the median of all pairwise slopes (robust to outliers). */
+export function theilSen(x: number[], y: number[]) {
+  const slopes: number[] = [];
+  for (let i = 0; i < x.length - 1; i++) for (let j = i + 1; j < x.length; j++) if (x[j] !== x[i]) slopes.push((y[j] - y[i]) / (x[j] - x[i]));
+  const slope = slopes.length ? median(slopes) : 0;
+  const intercept = median(y.map((v, i) => v - slope * x[i]));
+  return { slope, intercept: Number.isFinite(intercept) ? intercept : 0 };
+}
+
+/**
+ * One-sided Fisher exact test: probability of seeing at least `a` of the `k` breakout videos with a trait,
+ * when `m` of all `n` videos have it (hypergeometric upper tail).
+ */
+export function fisherUpper(a: number, k: number, m: number, n: number) {
+  const lc = (nn: number, kk: number) => { let s = 0; for (let i = 1; i <= kk; i++) s += Math.log(nn - kk + i) - Math.log(i); return s; };
+  const denom = lc(n, k);
+  let p = 0;
+  for (let x = a; x <= Math.min(k, m); x++) {
+    if (k - x > n - m) continue;
+    p += Math.exp(lc(m, x) + lc(n - m, k - x) - denom);
+  }
+  return Math.min(1, p);
+}

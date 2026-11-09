@@ -3,7 +3,7 @@
 // Without a take, a 3-second test video is generated with FFmpeg.
 //
 // It goes through the Content Studio the way a person does:
-//   every dashboard API and page · the 9 preset styles (each with its prompt template, Simple Edit for plain footage) · a reference style from a video · a machine with a photo
+//   every dashboard API and page · the 9 preset styles (each with its prompt template, Simple Edit for plain footage) · a reference style from a video · a style pack added from files · a machine with a photo
 //   · a new video with a take and a picture · the prompt (style spec, links, suggestions, file names) · Copy prompt
 //   · the finished video put in content_final with its captions file -> Completed · a video without a job code
 //   imported from content_final · a content_raw folder with brief.txt -> a new video · uploading a final on the page
@@ -87,7 +87,7 @@ ok('Drive (or the local drive folder) available', !!status.workspace, status.wor
 
 // ---------- 2. styles: 9 presets + a reference video
 const styles = (await api('GET', '/api/studio/styles')).data;
-const presets = styles.filter((s) => s.group === 'preset');
+const presets = styles.filter((s) => s.group === 'preset' && !s.custom);   // the 9 built-in styles (style packs added by hand are 'custom')
 ok('9 preset styles, Simple Edit among them', presets.length === 9 && presets.some((s) => s.key === 'simple_edit' && s.footage_only), presets.map((s) => s.name).join(', '));
 ok('presets carry what the card and detail need', presets.every((s) => s.looks && s.best_for && s.technique && s.example_topic));
 const refUp = await api('POST', '/api/studio/styles', form({ name: 'E2E reference', notes: 'the fast cuts' }, [ref]), true);
@@ -134,6 +134,27 @@ const simplePrompt = (await api('GET', `/api/studio/jobs/${simpleJob.id}/prompt`
 ok('Simple Edit prompt: cuts of the footage, no graphics or subtitles', simplePrompt.includes('no motion graphics') && simplePrompt.includes('Subtitles: Disabled') && simplePrompt.includes('as long as the footage needs') && simplePrompt.includes('thumbnail.jpg'));
 const delRef = await api('DELETE', `/api/studio/styles/${refUp.data.id}`);
 ok('a reference style in use cannot be deleted', delRef.status === 409);
+
+// ---------- 2b. style packs: a new style added from files, no code change (docs/style-pack-example)
+const packDir = path.join(root, 'docs', 'style-pack-example');
+const packFiles = fs.readdirSync(packDir).map((n) => path.join(packDir, n));
+const packUp = await api('POST', '/api/studio/style-packs', form({}, packFiles), true);
+ok('style pack added from its files', packUp.status === 200 && packUp.data?.key === 'pack_blueprint_lines', packUp.data?.error ?? JSON.stringify(packUp.data).slice(0, 100));
+const packStyle = (await api('GET', '/api/studio/styles')).data.find((x) => x.key === 'pack_blueprint_lines');
+ok('the pack is listed like the built-in styles, with its picture and README', packStyle?.group === 'preset' && packStyle.custom === true && packStyle.number >= 10 && !!packStyle.thumbnail && !!packStyle.readme && !!packStyle.looks, JSON.stringify(packStyle ?? {}).slice(0, 100));
+const packThumb = packStyle ? await fetch(BASE + packStyle.thumbnail, { headers: { cookie } }) : { status: 0, headers: new Headers() };
+ok('the pack thumbnail is served as a picture', packThumb.status === 200 && packThumb.headers.get('content-type') === 'image/png', `HTTP ${packThumb.status}`);
+const packBad = await api('POST', '/api/studio/style-packs', form({}, packFiles.filter((f) => !f.endsWith('template.md'))), true);
+ok('an incomplete pack is refused with a clear reason', packBad.status === 400 && /template\.md is missing/.test(packBad.data?.error ?? ''), packBad.data?.error ?? '');
+const packAgain = await api('POST', '/api/studio/style-packs', form({}, packFiles), true);
+ok('adding the same pack again replaces it (no duplicate)', packAgain.status === 200 && packAgain.data?.created === false && (await api('GET', '/api/studio/styles')).data.filter((x) => x.key === 'pack_blueprint_lines').length === 1);
+const packJob = (await api('POST', '/api/studio/jobs', { title: 'E2E pack style', kind: 'footage', style: 'pack_blueprint_lines', brief: { topic: 'How a centrifugal pump moves water' },
+  options: { length_sec: 30, format: '9:16', music: true, sfx: true, subtitles: false } })).data;
+const packPrompt = (await api('GET', `/api/studio/jobs/${packJob.id}/prompt`)).data.prompt ?? '';
+const packMissing = ['Blueprint line drawing', '**Topic:** How a centrifugal pump moves water', 'Duration without voiceover: 30 seconds', `\`${packJob.code} E2E pack style.mp4\``, `\`${packJob.code} thumbnail.jpg\``].filter((x) => !packPrompt.includes(x));
+ok('a video made in a pack style gets the pack template, filled in, with the hand-off', packJob?.status === 'prompt_ready' && !packMissing.length && !packPrompt.includes('{{'), packMissing.join(' | '));
+const packDel = await api('DELETE', `/api/studio/style-packs/${packUp.data.id}`);
+ok('a pack in use cannot be deleted', packDel.status === 409, `HTTP ${packDel.status}`);
 
 // ---------- 5. the finished video arrives in content_final
 let teaserCode = null;
@@ -232,6 +253,9 @@ if (finalFolder) {
 
 // ---------- clean up the test videos
 for (const id of [refJob.id, pageJob.id, simpleJob.id]) await api('DELETE', `/api/studio/jobs/${id}`);
+await api('DELETE', `/api/studio/jobs/${packJob.id}`);
+const packGone = await api('DELETE', `/api/studio/style-packs/${packUp.data.id}`);
+ok('a pack no longer in use can be deleted', packGone.status === 200 && !(await api('GET', '/api/studio/styles')).data.some((x) => x.key === 'pack_blueprint_lines'), `HTTP ${packGone.status}`);
 await api('DELETE', `/api/studio/styles/${refUp.data.id}`);
 await api('DELETE', `/api/studio/machines/${mach.data.id}`);
 if (finalFolder) for (const f of fs.readdirSync(finalFolder).filter((n) => n.includes('E2E') || n.startsWith(job.code) || n.startsWith(pageJob.code) || (teaserCode && n.startsWith(teaserCode)))) { try { fs.unlinkSync(path.join(finalFolder, f)); } catch {} }

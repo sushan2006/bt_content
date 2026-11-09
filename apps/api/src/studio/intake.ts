@@ -10,6 +10,7 @@
 import { one, q } from '../db/pool.js';
 import { currentFolders, driveCreateFolder, driveList, driveMove, driveReadText, getWorkspace, isDriveId, localScanDue, workspaceToken } from '../integrations/workspace.js';
 import { PRESETS } from './presets.js';
+import { packPresets } from './packs.js';
 import { addFile, createJob, recordSuggestion, studioSettings, takeThumbnail } from './pipeline.js';
 
 const VIDEO = /\.(mp4|mov|m4v|mkv|webm|avi|mts)$/i;
@@ -44,7 +45,7 @@ export function parseBrief(text: string): any {
 export function styleFromText(s?: string | null): string | null {
   if (!s) return null;
   const t = s.toLowerCase().replace(/[^a-z0-9]+/g, '');
-  const p = PRESETS.find((x) => x.key.replace(/_/g, '') === t || x.name.toLowerCase().replace(/[^a-z0-9]+/g, '') === t || String(x.number) === t);
+  const p = [...PRESETS, ...packPresets()].find((x) => x.key.replace(/_/g, '') === t || x.name.toLowerCase().replace(/[^a-z0-9]+/g, '') === t || String(x.number) === t);
   return p?.key ?? null;
 }
 

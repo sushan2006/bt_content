@@ -60,6 +60,7 @@ export default function Overview() {
           <section className="bg-white border border-stone-200 rounded-xl p-5">
             <div className="text-[11px] uppercase tracking-wide text-ink-3 font-semibold mb-1">The short version</div>
             <p className="text-lg leading-snug font-medium text-ink">{brief?.headline ?? 'No analysis yet. Press "Update analysis" once posts are synced and linked to their videos.'}</p>
+            {brief?.trend && <p className="text-sm text-ink-2 mt-2"><span className="font-medium text-ink">Over time — </span>{brief.trend}</p>}
           </section>
 
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -75,7 +76,7 @@ export default function Overview() {
                 <ol className="space-y-3">{brief.actions.slice(0, 3).map((a: any, i: number) => (
                   <li key={i} className="flex gap-3">
                     <span className="shrink-0 w-6 h-6 rounded-full bg-ink text-white text-xs flex items-center justify-center font-semibold">{i + 1}</span>
-                    <div><div className="text-sm font-medium leading-snug">{a.action}</div><div className="text-xs text-ink-2 mt-0.5">Why: {a.title}.</div><div className="mt-1"><CertaintyBadge c={a.certainty} /></div></div>
+                    <div><div className="text-sm font-medium leading-snug">{String(a.action).replace(/^For the next videos: (.)/, (_: string, c: string) => c.toUpperCase())}</div><div className="text-xs text-ink-2 mt-0.5">Why: {a.title}.</div><div className="mt-1"><CertaintyBadge c={a.certainty} /></div></div>
                   </li>))}</ol>)}
             </Card>
             <Card title="Best and weakest videos" subtitle={wins || problems ? 'Compared with what is expected for their platform and length' : 'Compared with other posts on the same platform'}>

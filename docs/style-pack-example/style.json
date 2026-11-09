@@ -1,0 +1,13 @@
+{
+  "name": "Blueprint Lines",
+  "tagline": "technical drawing",
+  "technique": "Canvas 2D · line draw-on",
+  "about": "White technical line drawings that draw themselves on a blueprint grid.",
+  "looks": "A deep blue blueprint sheet with a faint grid. Machines and ideas are drawn as clean white and cyan outlines that trace on stroke by stroke, with dimension lines, numbered callouts and small handwritten-style notes.",
+  "best_for": "How a machine or process works, factory and product explainers, anything that should feel precise and engineered.",
+  "good_to_know": "Line drawings stay readable only when they are large and uncluttered. Claude keeps one drawing per idea and holds each finished drawing for at least 2 seconds.",
+  "example_topic": "How a centrifugal water pump moves water",
+  "storyboard_first": false,
+  "footage_only": false,
+  "defaults": { "music": true, "sfx": true, "subtitles": false }
+}

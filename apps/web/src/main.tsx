@@ -13,6 +13,7 @@ import Insights from './pages/Insights';
 import Recommendations from './pages/Recommendations';
 import Integrations from './pages/Integrations';
 import Settings from './pages/Settings';
+import Audit from './pages/Audit';
 import StudioHome from './pages/studio/StudioHome';
 import StudioNew from './pages/studio/StudioNew';
 import StudioJob from './pages/studio/StudioJob';
@@ -38,6 +39,7 @@ const NAV: { to: string; label: string; perm: string; dot?: string; section?: st
   { to: '/recommendations', label: 'Recommendations', perm: 'insights.view' },
   { to: '/integrations', label: 'Integrations', perm: 'integrations.manage|analytics.view', section: 'Setup' },
   { to: '/settings', label: 'Settings', perm: 'users.manage|settings.manage' },
+  { to: '/audit', label: 'Audit & Activity', perm: 'audit.view' },
 ];
 
 function Shell({ children }: { children: React.ReactNode }) {
@@ -46,7 +48,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   const nav = useNavigate();
   return (
     <div className="min-h-screen flex">
-      <aside className="w-56 shrink-0 border-r border-stone-200 bg-white flex flex-col">
+      <aside className="w-56 shrink-0 border-r border-stone-200 bg-white flex flex-col sticky top-0 h-screen self-start">
         <div className="px-5 py-5 border-b border-stone-100">
           <div className="text-[15px] font-semibold text-ink leading-tight">Content Intelligence</div>
           <div className="text-[11px] text-ink-3">Studio · social analytics · AI insights</div>
@@ -106,6 +108,7 @@ function App() {
         <Route path="/recommendations" element={guarded(<Recommendations />)} />
         <Route path="/integrations" element={guarded(<Integrations />)} />
         <Route path="/settings" element={guarded(<Settings />)} />
+        <Route path="/audit" element={guarded(<Audit />)} />
         <Route path="/studio" element={guarded(<StudioHome />)} />
         <Route path="/studio/new" element={guarded(<StudioNew />)} />
         <Route path="/studio/music" element={<Navigate to="/studio/styles?tab=music" replace />} />

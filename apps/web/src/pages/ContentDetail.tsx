@@ -10,6 +10,7 @@ const COMPARE = [
   ['total_watch_time_sec', 'Total watch time', fmt.sec], ['likes', 'Likes', fmt.n], ['reactions', 'Reactions', fmt.n], ['comments', 'Comments', fmt.n],
   ['shares', 'Shares', fmt.n], ['saves', 'Saves', fmt.n], ['profile_visits', 'Profile visits', fmt.n], ['follows', 'Follows', fmt.n],
   ['clicks', 'Clicks', fmt.n], ['subscribers_gained', 'Subscribers gained', fmt.n], ['ctr', 'Impressions CTR', (v: number) => fmt.pct(v, 1)],
+  ['skip_rate', 'Skipped in first 3 s', (v: number) => `${Math.round(v > 1 ? v : v * 100)}%`],
 ] as const;
 const FEATURE_OPTIONS: Record<string, string[]> = {
   opening_style: ['product_demo_first', 'problem_first', 'question', 'company_intro', 'slow_cinematic', 'direct_statement', 'unknown'],

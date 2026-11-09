@@ -88,8 +88,16 @@ export interface DriverEffect {
   n_level: number; n_reference: number;
   overlaps_with: string[];            // other features this level is almost always paired with
 }
+/** One tag level compared with all other videos that have a known value for the same feature (what a manager means by "the rest"). */
+export interface DriverContrast {
+  feature: string; level: string;
+  effect_z: number; effect_natural: number; low: number; high: number; prob_direction: number;
+  n_level: number; n_rest: number;
+  overlaps_with: string[];
+  p_perm: number;                     // permutation p-value: share of label shuffles (whole videos) giving a contrast at least this large
+}
 
-export function driversModel(rows: DriverRow[], featureKeys: string[], opts: { bootstrap?: number; seed?: number } = {}) {
+export function driversModel(rows: DriverRow[], featureKeys: string[], opts: { bootstrap?: number; permutations?: number; seed?: number } = {}) {
   // Standardise outcome within platform
   const byP = new Map<string, number[]>();
   for (const r of rows) byP.set(r.platform, [...(byP.get(r.platform) ?? []), r.y]);
@@ -140,13 +148,11 @@ export function driversModel(rows: DriverRow[], featureKeys: string[], opts: { b
   const pred = X.map((x) => predict(fit, x));
   const ssr = z.reduce((s, v, i) => s + (v - pred[i]) ** 2, 0), sst = z.reduce((s, v) => s + (v - mean(z)) ** 2, 0) || 1;
 
-  const effects: DriverEffect[] = encoding.map((e, j) => {
-    const d = draws[j].sort((a, b) => a - b), beta = fit.beta[j];
-    const agree = d.filter((x) => Math.sign(x) === Math.sign(beta) && x !== 0).length / d.length;
-    const lvRows = usable.filter((r) => r.features[e.feature] === e.level);
+  const overlapsOf = (feature: string, level: string) => {
+    const lvRows = usable.filter((r) => r.features[feature] === level);
     const overlaps: string[] = [];
     for (const other of featureKeys) {
-      if (other === e.feature) continue;
+      if (other === feature) continue;
       const vals = lvRows.map((r) => r.features[other]).filter((v) => v != null && v !== 'unknown') as string[];
       if (vals.length < 2) continue;
       const counts = new Map<string, number>(); vals.forEach((v) => counts.set(v, (counts.get(v) ?? 0) + 1));
@@ -154,14 +160,62 @@ export function driversModel(rows: DriverRow[], featureKeys: string[], opts: { b
       const base = usable.filter((r) => r.features[other] === topV).length / usable.length;
       if (n / vals.length >= 0.85 && base < 0.6) overlaps.push(`${other}=${topV}`);
     }
+    return overlaps;
+  };
+  const q05 = (d: number[]) => d[Math.floor(0.05 * (d.length - 1))], q95 = (d: number[]) => d[Math.ceil(0.95 * (d.length - 1))];
+  const effects: DriverEffect[] = encoding.map((e, j) => {
+    const d = [...draws[j]].sort((a, b) => a - b), beta = fit.beta[j];
+    const agree = d.filter((x) => Math.sign(x) === Math.sign(beta) && x !== 0).length / d.length;
     return {
-      ...e, effect_z: beta, effect_natural: beta * sdNatural,
-      low: d[Math.floor(0.05 * (d.length - 1))] * sdNatural, high: d[Math.ceil(0.95 * (d.length - 1))] * sdNatural,
-      prob_direction: agree, n_level: lvRows.length, n_reference: usable.filter((r) => r.features[e.feature] === e.reference).length,
-      overlaps_with: overlaps,
+      ...e, effect_z: beta, effect_natural: beta * sdNatural, low: q05(d) * sdNatural, high: q95(d) * sdNatural,
+      prob_direction: agree, n_level: usable.filter((r) => r.features[e.feature] === e.level).length,
+      n_reference: usable.filter((r) => r.features[e.feature] === e.reference).length, overlaps_with: overlapsOf(e.feature, e.level),
     };
   });
-  return { effects, n: usable.length, clusters: ids.length, lambda, r2: 1 - ssr / sst, sdNatural, platforms };
+
+  // Each level against the rest: beta(level) − count-weighted mean of the other levels' betas (reference = 0), same for every bootstrap fit.
+  const contrastFn = (f: string, data: DriverRow[]) => {
+    const cols = encoding.map((e, j) => ({ e, j })).filter((x) => x.e.feature === f);
+    const levels = [{ level: cols[0].e.reference, j: -1 }, ...cols.map((c) => ({ level: c.e.level, j: c.j }))]
+      .map((l) => ({ ...l, n: data.filter((r) => r.features[f] === l.level).length }));
+    return { levels, of: (L: typeof levels[number], beta: (j: number) => number) => {
+      const rest = levels.filter((x) => x !== L), nRest = rest.reduce((s2, x) => s2 + x.n, 0);
+      return nRest ? beta(L.j) - rest.reduce((s2, x) => s2 + x.n * beta(x.j), 0) / nRest : 0;
+    } };
+  };
+  // Permutation test (small-sample safe): shuffle one tag's values between whole videos, refit, and count how often chance
+  // alone gives a contrast at least as large. Keeps each video's posts together and every other tag as it was.
+  const P = opts.permutations ?? 300, prand = rng((opts.seed ?? 11) + 1);
+  const clusterIds = [...new Set(clusters)];
+  const contrasts: DriverContrast[] = [];
+  for (const f of [...new Set(encoding.map((e) => e.feature))]) {
+    const cf = contrastFn(f, usable);
+    const betaOf = (j: number, b?: number) => (j < 0 ? 0 : b === undefined ? fit.beta[j] : draws[j][b]);
+    const obs = cf.levels.map((L) => (L.n >= 2 ? cf.of(L, (j) => betaOf(j)) : 0));
+    const exceed = cf.levels.map(() => 0);
+    // the tag value of each video (its first post's value; tags are per video)
+    const valueOf = new Map(clusterIds.map((id) => [id, usable[clusters.indexOf(id)].features[f] ?? null]));
+    for (let k = 0; k < P; k++) {
+      const vals = [...valueOf.values()];
+      for (let i = vals.length - 1; i > 0; i--) { const j = Math.floor(prand() * (i + 1)); [vals[i], vals[j]] = [vals[j], vals[i]]; }
+      const perm = new Map(clusterIds.map((id, i) => [id, vals[i]]));
+      const data = usable.map((r) => ({ ...r, features: { ...r.features, [f]: perm.get(r.cluster) } }));
+      const m = ridge(data.map(encode), z, lambda);
+      const pc = contrastFn(f, data);
+      pc.levels.forEach((L, i) => { if (Math.abs(pc.of(L, (j) => (j < 0 ? 0 : m.beta[j]))) >= Math.abs(obs[i]) - 1e-12) exceed[i]++; });
+    }
+    cf.levels.forEach((L, i) => {
+      const rest = cf.levels.filter((x) => x !== L), nRest = rest.reduce((s2, x) => s2 + x.n, 0);
+      if (!nRest || L.n < 2) return;
+      const c = obs[i], d = Array.from({ length: B }, (_, b) => cf.of(L, (j) => betaOf(j, b))).sort((a, b2) => a - b2);
+      contrasts.push({
+        feature: f, level: L.level, effect_z: c, effect_natural: c * sdNatural, low: q05(d) * sdNatural, high: q95(d) * sdNatural,
+        prob_direction: d.filter((x) => Math.sign(x) === Math.sign(c) && x !== 0).length / d.length, n_level: L.n, n_rest: nRest,
+        overlaps_with: overlapsOf(f, L.level), p_perm: (1 + exceed[i]) / (1 + P),
+      });
+    });
+  }
+  return { effects, contrasts, n: usable.length, clusters: ids.length, lambda, r2: 1 - ssr / sst, sdNatural, platforms };
 }
 
 /* ---------------- partial pooling of group averages ---------------- */

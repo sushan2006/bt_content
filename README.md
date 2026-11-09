@@ -74,7 +74,7 @@ Then switch **Data → Demo data** at the top right. Demo records are synthetic,
 ## Content Studio (Phase 4: edited by Claude Code)
 
 The dashboard sets the video up and writes the prompt; the edit itself is made in a Claude Code chat (your Claude plan, no API key or token cost).
-1. **New video**: pick one of the 9 styles (8 animated looks plus **Simple Edit**: clean cuts of real footage, no graphics or captions, for office tours and factory walk-throughs; or a style copied from a reference video), say what the video is about, choose what Claude gets
+1. **New video**: pick one of the 9 styles (8 animated looks plus **Simple Edit**: clean cuts of real footage, no graphics or captions, for office tours and factory walk-throughs), say what the video is about, choose what Claude gets
    (camera takes, a voiceover MP3, or nothing), length, format (9:16 / 16:9), storyboard first, music and sound effects. Takes and pictures go to Drive.
 2. The video page has **Copy prompt**. Paste it into a new Claude Code chat in the `content_bt` project and attach the footage.
    The prompt carries the brief, the full style spec, brand kit, Drive links, colleagues' suggestions and what the analytics say works.
@@ -85,6 +85,8 @@ The dashboard sets the video up and writes the prompt; the edit itself is made i
 4. **Completed → Publish**: captions per platform (pre-filled), publish now or schedule. Posts are linked to the analytics.
 
 Stages: Prompt ready → Editing with Claude → Ready to publish → Published. How Claude builds the edits: `docs/EDITING_GUIDE.md`. Plan: `docs/PHASE4_PLAN.md`.
+**More styles:** the nine styles are built in. A new one is added from the dashboard as a **style pack** (Styles & music → Add a style pack): ask Claude to make a pack from a video you like, add its folder, and it appears with its picture and can be chosen for any new video. No code change, so it works on the deployed site too. Attach [`docs/STYLE_PACK_KIT.md`](docs/STYLE_PACK_KIT.md) and the video to any Claude chat that can run code; the dashboard side is in [`docs/ADD_A_STYLE.md`](docs/ADD_A_STYLE.md); an example is in `docs/style-pack-example/`.
+
 The Python service (`services/analyzer`) only analyses published videos for the analytics and measures reference styles; it edits nothing.
 
 ## Tests

@@ -18,9 +18,10 @@ import { currentFolders, driveCreateFolder, driveDownload, driveList, driveReadT
 import { buildPrompt, captionsName, finalName, isThumbnailName, jobCodeFromName, parseCaptions, thumbnailName, type PromptContext } from './handoff.js';
 import { styleTemplate } from './templates.js';
 import { toJpeg, videoFrame } from './thumbs.js';
-import { LEGACY_STYLES, PRESET_BY_KEY } from './presets.js';
-import { RULE_PLAIN, rulesFromEngine } from './rules.js';
-import { isValidStyle } from './styles.js';
+import { LEGACY_STYLES } from './presets.js';
+import { learningsFor } from './learnings.js';
+import { learningLine } from '../intelligence/learnings.js';
+import { isValidStyle, presetFor } from './styles.js';
 
 export const VIDEO_EXT = /\.(mp4|mov|m4v|mkv|webm|avi|mts)$/i;
 export const OPEN_STATUSES = ['prompt_ready', 'with_claude'];
@@ -176,7 +177,7 @@ export async function promptContext(jobId: string): Promise<PromptContext> {
     ? await q<any>(`SELECT name, notes, keywords, photo_links FROM machines WHERE id = ANY($1::uuid[]) ORDER BY array_position($1::uuid[], id)`, [job.machine_ids]) : [];
   const music = job.music_track_id ? await one<any>(`SELECT * FROM music_tracks WHERE id=$1`, [job.music_track_id]) : null;
   const sugg = await q<any>(`SELECT from_email, text FROM production_suggestions WHERE job_id=$1 AND NOT is_none ORDER BY received_at`, [jobId]);
-  const engine = await rulesFromEngine(job.data_origin === 'demo' ? 'demo' : 'live').catch(() => ({ rules: [] as any[] }));
+  const lessons = await learningsFor(job.data_origin === 'demo' ? 'demo' : 'live', { style: key, platforms: job.platforms ?? [] }).catch(() => null);
   const ws = await getWorkspace().catch(() => null);
   const folders = ws?.status === 'connected' ? await currentFolders(ws).catch(() => null) : null;
   const finalLink = ws && !ws.local && folders?.final ? `https://drive.google.com/drive/folders/${folders.final}` : null;
@@ -185,7 +186,7 @@ export async function promptContext(jobId: string): Promise<PromptContext> {
   const voice = files.find((f) => f.kind === 'voiceover');
   return {
     job: { code: job.code, title: job.title, kind: job.kind, options: job.options ?? {}, platforms: job.platforms ?? [], brief: job.brief ?? {}, publish_at: job.publish_at },
-    style: { preset: key ? PRESET_BY_KEY[key] ?? null : null, reference, legacy: key && !PRESET_BY_KEY[key] && !reference ? LEGACY_STYLES[key] ?? key : null },
+    style: { preset: key ? presetFor(key) : null, reference, legacy: key && !presetFor(key) && !reference ? LEGACY_STYLES[key] ?? key : null },
     brand: { company_name: brand.company_name, handle: brand.handle, tagline: brand.tagline, cta: brand.cta, colors: brand.colors, logo_link: webLink(brand.logo_drive_link) },
     glossary: settings.glossary ?? [],
     takes: files.filter((f) => f.kind === 'take').map(ref),
@@ -194,10 +195,10 @@ export async function promptContext(jobId: string): Promise<PromptContext> {
     machines: machines.map((m) => ({ name: m.name, notes: m.notes, keywords: m.keywords ?? [], photo_links: m.photo_links ?? [] })),
     music: music && job.options?.music ? { title: music.title, artist: music.artist, source: music.source?.replace(/_/g, ' '), link: webLink(music.drive_link), license: music.license_note } : null,
     suggestions: sugg.map((s) => ({ from: s.from_email.replace(/@drive$/, ' (Drive)'), text: s.text })),
-    findings: engine.rules.map((r: any) => `${RULE_PLAIN[r.code] ?? r.code} — ${r.text}`).slice(0, 8),
+    findings: (lessons?.items ?? []).filter((i) => i.for_claude).map((i) => learningLine(i)),
     final_folder: { where: ws?.local ? "content_final (the dashboard's local folder: Google Drive is not connected)" : 'content_final', link: finalLink },
     job_folder_link: folderLink,
-    template: key && PRESET_BY_KEY[key] ? styleTemplate(key) : null,
+    template: key && presetFor(key) ? styleTemplate(key) : null,
   };
 }
 

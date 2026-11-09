@@ -87,6 +87,7 @@ Then send the draft with 3–4 frames and a short list of what each beat does. C
 - Put all three in Google Drive › `content_final` when the Drive connector can write there. Otherwise send them in the chat; the person puts them in content_final or uses *Upload final video* on the video page.
 
 ## 6. Notes per style
+- **Style from a pack** (a style added in the dashboard): its template is the style; follow it the same way as a built-in one. To *make* a pack from a video, see `docs/ADD_A_STYLE.md`.
 - **Paper Cut-Out:** draw each piece as a polygon with a jittered edge, a paper-noise texture (pre-render it once), and `shadowBlur` + offset. Animate on twos (hold each pose 2 frames) for the stop-motion feel.
 - **Generative Particles:** Three.js `Points` with additive blending. Sample target positions from text drawn on an offscreen canvas or from SVG paths. Tween with a seeded curl noise. Keep word shapes fully formed about 1.5 s.
 - **Liquid Glass:** render the scene to a texture, then draw lenses with a fragment shader: offset UVs by a bevel normal, add a rim light, a slight chromatic split and a soft shadow.
