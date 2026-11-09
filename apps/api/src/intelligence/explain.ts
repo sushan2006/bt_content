@@ -67,12 +67,20 @@ export async function explainPublication(publicationId: string) {
   const changes: { change: string; why: string; certainty: string }[] = [];
   const past = (t: string) => t.replace(/^(do not|open|have|use|show|start|end|are|keep) /, (m0) => (({ 'do not ': 'did not ', 'open ': 'opened ', 'have ': 'had ', 'use ': 'used ', 'show ': 'showed ', 'start ': 'started ', 'end ': 'ended ', 'are ': 'were ', 'keep ': 'kept ' } as Record<string, string>)[m0] ?? m0));
   for (const dr of drivers) {
-    const f = dr.metrics.feature as string, better = dr.metrics.better as string, outcome = dr.metrics.outcome as string;
+    const f = dr.metrics.feature as string, outcome = dr.metrics.outcome as string;
     if (f === 'publish_slot') continue;
     const mine = me.features[f];
-    if (mine == null || String(mine) === better) continue;
+    if (mine == null) continue;
     if ((d.expected[outcome]?.z ?? -1) >= 0) continue; // this video already did well on what that pattern improves
-    changes.push({ change: `Next time, ${featurePlain(f, better)} — this video ${past(featurePlain(f, String(mine)))}.`, why: dr.headline, certainty: dr.certainty });
+    if (dr.metrics.direction === 'avoid') {
+      // a warning applies only to videos that did the thing warned about
+      if (String(mine) !== String(dr.metrics.worse)) continue;
+      changes.push({ change: `Next time, avoid this: the video ${past(featurePlain(f, String(mine)))}.`, why: dr.headline, certainty: dr.certainty });
+    } else {
+      const better = String(dr.metrics.better);
+      if (String(mine) === better) continue;
+      changes.push({ change: `Next time, ${featurePlain(f, better)} — this video ${past(featurePlain(f, String(mine)))}.`, why: dr.headline, certainty: dr.certainty });
+    }
     if (changes.length >= 3) break;
   }
   if (c && c.shape !== 'healthy') changes.unshift({ change: SHAPE_PLAIN[c.shape].fix, why: `This video's viewer pattern: ${SHAPE_PLAIN[c.shape].name.toLowerCase()}.`, certainty: 'measured' });

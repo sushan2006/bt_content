@@ -17,8 +17,11 @@ import { coverSignature, schedulePublishing } from '../studio/publish.js';
 import { finalName, captionsName, thumbnailName } from '../studio/handoff.js';
 import { toJpeg } from '../studio/thumbs.js';
 import { forgetStyleName, isValidStyle, listStyles, styleName } from '../studio/styles.js';
+import { PACK_LIMITS, parsePack } from '../studio/packFormat.js';
+import { deletePack, loadPacks, packThumb, savePack } from '../studio/packs.js';
 import { scanDrive } from '../studio/intake.js';
 import { studio } from '../studio/studioClient.js';
+import { learningsFor } from '../studio/learnings.js';
 
 const IMAGE_EXT = /\.(jpe?g|png|webp)$/i;
 const AUDIO_EXT = /\.(mp3|wav|m4a|aac|ogg|flac)$/i;
@@ -85,7 +88,16 @@ const jobSetup = z.object({
   machine_ids: z.array(z.string().uuid()).max(6).optional(),
 });
 
+/** Reads one uploaded file into memory, up to `max` bytes; a larger file is read through and dropped. */
+async function readCapped(part: any, max: number): Promise<Buffer | null> {
+  const chunks: Buffer[] = []; let n = 0;
+  for await (const c of part.file) { n += c.length; if (n <= max) chunks.push(c as Buffer); }
+  return n <= max ? Buffer.concat(chunks) : null;
+}
+
 export async function studioRoutes(app: FastifyInstance) {
+  await loadPacks();
+  setInterval(() => { loadPacks().catch(() => {}); }, 60_000).unref();
   const view = { preHandler: requirePermission('studio.view') };
   const manage = { preHandler: requirePermission('studio.manage') };
   const suggest = { preHandler: requirePermission('studio.suggest', 'studio.manage') };
@@ -449,6 +461,12 @@ export async function studioRoutes(app: FastifyInstance) {
 
   // ---------------- editing styles: the 9 presets + styles learned from reference videos
   app.get('/api/studio/styles', view, async () => listStyles());
+  // what past videos teach for the one being set up (New video page; the same list goes into the prompt)
+  app.get('/api/studio/learnings', view, async (req) => {
+    const qs = z.object({ style: z.string().max(80).optional(), platforms: z.string().max(80).optional(), origin: z.string().optional() }).parse(req.query ?? {});
+    const platforms = (qs.platforms ?? '').split(',').filter((p) => PLATFORM.safeParse(p).success);
+    return learningsFor(qs.origin === 'demo' ? 'demo' : 'live', { style: qs.style || null, platforms });
+  });
   app.post('/api/studio/styles', manage, async (req, reply) => {
     const dir = path.join(mediaDir, 'studio', 'styles');
     const fields: Record<string, string> = {};
@@ -492,6 +510,43 @@ export async function studioRoutes(app: FastifyInstance) {
     const p = await one<any>('SELECT source_path, drive_file_id FROM style_profiles WHERE id=$1', [(req.params as any).id]);
     if (p?.source_path && fs.existsSync(p.source_path)) return sendFile(reply, p.source_path, req.headers.range, 'video/mp4');
     return streamDrive(reply, p?.drive_file_id, req.headers.range);
+  });
+
+  // ---------------- style packs: a new editing style added from the dashboard (style.json + template.md + thumbnail + README)
+  app.post('/api/studio/style-packs', manage, async (req, reply) => {
+    const files: { name: string; data: Buffer }[] = [];
+    const skipped: string[] = [];
+    for await (const part of (req as any).parts()) {
+      if (part.type !== 'file') continue;
+      const data = await readCapped(part, PACK_LIMITS.each);
+      if (data) files.push({ name: part.filename ?? '', data }); else skipped.push(part.filename ?? 'a file');
+    }
+    const r = parsePack(files);
+    if (!r.ok) {
+      const errors = [...r.errors, ...skipped.map((n) => `${n} is too large for a style pack and was skipped.`)];
+      return reply.code(400).send({ error: errors.join('\n'), errors });
+    }
+    const { id, created } = await savePack(r.pack, req.user_!.id);
+    await audit(req.user_!.id, created ? 'studio.style_pack.add' : 'studio.style_pack.replace', 'style_pack', id, { key: r.pack.key, name: r.pack.name });
+    return { ok: true, id, key: r.pack.key, name: r.pack.name, created, ignored: [...r.pack.ignored, ...skipped] };
+  });
+  app.get('/api/studio/style-packs/:id/thumbnail', view, async (req, reply) => {
+    const id = String((req.params as any).id);
+    if (!/^[0-9a-f-]{36}$/i.test(id)) return reply.code(404).send({ error: 'Not found' });
+    const t = await packThumb(id);
+    if (!t) return reply.code(404).send({ error: 'Not found' });
+    return reply.header('content-type', t.thumb_type).header('cache-control', 'private, max-age=3600').header('x-content-type-options', 'nosniff').send(t.thumb);
+  });
+  app.delete('/api/studio/style-packs/:id', manage, async (req, reply) => {
+    const id = String((req.params as any).id);
+    if (!/^[0-9a-f-]{36}$/i.test(id)) return reply.code(404).send({ error: 'Not found' });
+    const pack = await one<any>('SELECT key, name FROM style_packs WHERE id=$1', [id]);
+    if (!pack) return reply.code(404).send({ error: 'Not found' });
+    const used = await one<any>(`SELECT code FROM production_jobs WHERE $1 = ANY(styles) AND status IN ('prompt_ready','with_claude') LIMIT 1`, [pack.key]);
+    if (used) return reply.code(409).send({ error: `${used.code} is being made in this style. Change its style first.` });
+    await deletePack(id);
+    await audit(req.user_!.id, 'studio.style_pack.delete', 'style_pack', id, { key: pack.key, name: pack.name });
+    return { ok: true };
   });
 
   // ---------------- machines: name + photos, so Claude can draw them in the video

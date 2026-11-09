@@ -1,0 +1,13 @@
+{
+  "name": "Surge Reel",
+  "tagline": "fast flash start, slow glow",
+  "technique": "Canvas 2D · flash-cut montage + glow",
+  "about": "A burst of flash cuts that hooks, then a calm glowing build, then a quick cinematic finish.",
+  "looks": "Dark, high-contrast and cinematic. The first seconds are a burst of about ten cuts a second, flipping between black and white frames, in colour-flipped silhouettes and white-on-black technical diagrams. Then the pace drops to one slow, unbroken scene: a single warm light in the dark, with glowing figures appearing one by one on the beat. A short, quicker montage of soft, cloudy and heat-map textures follows, and the video ends on a minimal green line shape on black. Small uppercase corner labels, like a film-lab HUD, stay on screen all the time.",
+  "best_for": "Teasers, intros, announcements, reels and concept pieces that need a strong first second and a calm, memorable middle. Also a good frame for a short story told in three beats: hook, build, payoff.",
+  "good_to_know": "The flash start is only about 3 seconds, so it carries one hook idea in words or shapes, never a full explanation. Claude keeps it under a quarter of the video and holds the slow scene for at least 4 seconds.",
+  "example_topic": "How a pump keeps a factory running through the night",
+  "storyboard_first": true,
+  "footage_only": false,
+  "defaults": { "music": true, "sfx": true, "subtitles": false }
+}

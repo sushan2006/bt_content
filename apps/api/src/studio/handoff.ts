@@ -240,7 +240,7 @@ export function templateSettings(c: PromptContext): { topic: string; settings: s
   const vertical = (o.format ?? '9:16') === '9:16';
   const on = (v: unknown) => (v ? 'Enabled' : 'Disabled');
   const voice = job.kind === 'voiceover' ? 'Enabled — the voiceover MP3 named in section 0 (I attach it to this chat)'
-    : job.kind === 'footage' ? (c.style.preset?.key === 'simple_edit' ? 'Disabled — any speech is part of the camera footage (see section 0)' : 'Enabled — the narration is the speech in the camera takes, cut into one clean track (see section 0)')
+    : job.kind === 'footage' ? (c.style.preset?.key === 'simple_edit' || c.style.preset?.footage_only ? 'Disabled — any speech is part of the camera footage (see section 0)' : 'Enabled — the narration is the speech in the camera takes, cut into one clean track (see section 0)')
       : 'Disabled';
   const duration = o.length_sec ? `${o.length_sec} seconds` : job.kind === 'footage' ? 'as long as the footage needs (keep it tight)' : '30 seconds';
   const topic = [String(b.topic ?? job.title).trim(), b.headline ? `Opening headline: "${b.headline}".` : ''].filter(Boolean).join(' ');
@@ -263,7 +263,7 @@ export function templateSettings(c: PromptContext): { topic: string; settings: s
 export function buildTemplatePrompt(c: PromptContext): string {
   const { job } = c;
   const b = job.brief ?? {};
-  const simple = c.style.preset?.key === 'simple_edit';
+  const simple = c.style.preset?.key === 'simple_edit' || !!c.style.preset?.footage_only;
   const company = c.brand.company_name || 'our company';
   const { topic, settings, audio } = templateSettings(c);
   const body = String(c.template).replace('{{TOPIC}}', () => topic).replace('{{SETTINGS}}', () => settings).replace('{{AUDIO_SETTINGS}}', () => audio).trim();

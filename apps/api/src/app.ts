@@ -15,6 +15,7 @@ import { contentRoutes } from './routes/content.js';
 import { analyticsRoutes } from './routes/analytics.js';
 import { insightRoutes } from './routes/insights.js';
 import { adminRoutes } from './routes/admin.js';
+import { auditRoutes } from './routes/audit.js';
 import { studioRoutes } from './routes/studio.js';
 
 export async function buildApp(opts: { logger?: boolean } = {}) {
@@ -47,6 +48,7 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   await app.register(analyticsRoutes);
   await app.register(insightRoutes);
   await app.register(adminRoutes);
+  await app.register(auditRoutes);
   await app.register(studioRoutes);
 
   // Serve the built web app (production / single-port local run)

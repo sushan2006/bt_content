@@ -6,8 +6,9 @@ import { useMe } from '../main';
 
 const TYPES: Record<string, string> = {
   driver: 'What makes videos work', curve_pattern: 'Where viewers leave', content_risk: 'Moments that lose viewers', cta_reach: 'Call to action',
-  platform_fit: 'Platforms', trend: 'Trend', data_coverage: 'Missing data',
+  platform_fit: 'Platforms', breakout: 'Breakout videos', trend: 'Trend', data_coverage: 'Missing data',
 };
+const LEGEND: [string, string][] = [['strong evidence', 'act on it'], ['good evidence', 'act on it and keep measuring'], ['early signal', 'test it on the next videos first']];
 
 export default function Insights() {
   const origin = useOrigin();
@@ -21,9 +22,13 @@ export default function Insights() {
   const run = async () => { setRunning(true); setErr(null); try { await api('/api/insights/run', { body: { scope: origin } }); reload(); } catch (e) { setErr((e as Error).message); } finally { setRunning(false); } };
   return (
     <>
-      <PageHeader title="Findings" subtitle={<>What your own videos show — most important first. Each finding says how sure we are; patterns are never presented as proven causes.{latest && <> Updated {fmt.ago(latest.created_at)}.</>}</>}
+      <PageHeader title="Findings" subtitle={<>What your own videos show, most important first.{latest && <> Updated {fmt.ago(latest.created_at)}.</>}</>}
         actions={can(me, 'analysis.run') && <Button variant="primary" onClick={run} disabled={running}>{running ? 'Analysing…' : 'Run analysis now'}</Button>} />
       <ErrorBox error={err} />
+      <div className="flex flex-wrap gap-x-5 gap-y-1 items-center text-xs text-ink-2 mb-4">
+        <span className="font-medium text-ink-3">How sure we are:</span>
+        {LEGEND.map(([c, t]) => <span key={c} className="inline-flex items-center gap-1.5"><CertaintyBadge c={c} /> {t}</span>)}
+      </div>
       <div className="flex flex-wrap gap-2 mb-4">
         <button onClick={() => setType('')} className={`px-3 py-1.5 rounded-full text-sm border ${!type ? 'bg-ink text-white border-ink' : 'bg-white border-stone-300 text-ink-2'}`}>All</button>
         {Object.entries(TYPES).filter(([k]) => (data ?? []).some((i) => i.insight_type === k)).map(([k, v]) => (
@@ -39,6 +44,7 @@ export default function Insights() {
 
 function Finding({ i }: { i: any }) {
   const s = i.story ?? {};
+  const todo = (s.what_to_do ?? '').replace(/^For the next videos: /, '');
   return (
     <article className="bg-white border border-stone-200 rounded-xl p-5">
       <div className="flex flex-wrap gap-2 items-center mb-2">
@@ -47,16 +53,19 @@ function Finding({ i }: { i: any }) {
         {i.cohort?.platform && i.cohort.platform !== 'all' && <PlatformTag code={i.cohort.platform} />}
       </div>
       <h2 className="text-lg font-semibold leading-snug text-ink">{i.headline ?? i.title}</h2>
-      <div className="grid gap-4 mt-4">
-        <StoryPart label="What happened">{s.what_happened ?? i.observation}</StoryPart>
-        {s.why && <StoryPart label="Likely reason">{s.why}</StoryPart>}
-        <div className="grid md:grid-cols-2 gap-3">
-          {s.what_to_do && <StoryPart label="What to do" tone="action">{s.what_to_do}</StoryPart>}
-          {s.impact && <StoryPart label="What it could be worth" tone="soft">{s.impact}</StoryPart>}
+      {todo && <div className="mt-3 bg-blue-50/60 border border-blue-100 rounded-lg px-3 py-2.5">
+        <div className="text-[11px] uppercase tracking-wide text-ink-3 font-semibold">What to do</div>
+        <div className="text-[15px] text-ink leading-relaxed">{todo.charAt(0).toUpperCase() + todo.slice(1)}</div>
+        {s.impact && <div className="text-xs text-ink-2 mt-1">{s.impact}</div>}
+      </div>}
+      <Disclosure label="Why we think this">
+        <div className="grid gap-4">
+          <StoryPart label="What happened">{s.what_happened ?? i.observation}</StoryPart>
+          {s.why && <StoryPart label="Likely reason">{s.why}</StoryPart>}
+          <StoryPart label="How sure we are">{s.how_sure}</StoryPart>
         </div>
-        <StoryPart label="How sure we are">{s.how_sure}</StoryPart>
-      </div>
-      <Disclosure label="Show the evidence (videos and statistics)"><Evidence id={i.id} /></Disclosure>
+        <Disclosure label="Show the videos and the statistics"><Evidence id={i.id} /></Disclosure>
+      </Disclosure>
     </article>
   );
 }
@@ -70,8 +79,9 @@ function Evidence({ id }: { id: string }) {
     <div className="space-y-4 text-sm">
       <div className="flex flex-wrap gap-2 items-center text-xs text-ink-2">
         <EvidenceBadge e={data.evidence_level} /> <span>Videos compared: {data.sample_size}</span>
-        {m.probability_direction != null && <span>· Share of re-samples agreeing on the direction: {Math.round(m.probability_direction * 100)}%</span>}
-        {m.q_value != null && <span>· False-discovery-adjusted p: {(+m.q_value).toFixed(3)}</span>}
+        {m.p_permutation != null && <span>· Chance of a pattern this strong by luck (shuffle test): {(+m.p_permutation).toFixed(3)}</span>}
+        {m.q_value != null && <span>· After allowing for all patterns checked (q): {(+m.q_value).toFixed(3)}</span>}
+        {m.probability_direction != null && <span>· Re-samples agreeing on the direction: {Math.round(m.probability_direction * 100)}%</span>}
         {m.interval_90 && <span>· 90% range of the difference: {fmtVal(m.outcome, m.interval_90[0])} to {fmtVal(m.outcome, m.interval_90[1])}</span>}
         {m.model_r2 != null && <span>· Model explains {Math.round(Math.max(0, m.model_r2) * 100)}% of the variation</span>}
       </div>
@@ -87,7 +97,7 @@ function Evidence({ id }: { id: string }) {
 }
 function fmtVal(metric: string, v: number | null) {
   if (v == null) return '—';
-  if (metric === 'times as fast') return `${(+v).toFixed(1)}×`;
+  if (metric === 'times as fast' || metric === 'times usual views') return `${(+v).toFixed(1)}×`;
   if (metric === 'engagement_rate') return `${(v * 1000).toFixed(0)} per 1,000`;
   return fmt.pct(v, 0);
 }

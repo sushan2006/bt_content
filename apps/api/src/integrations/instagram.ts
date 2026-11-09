@@ -8,10 +8,12 @@ import { daysAgo, isoDate } from '../sync/writer.js';
  * Notes (2025-2026):
  *  - impressions / plays / clips_replays_count were removed (Apr 2025). "views" replaces them.
  *  - Missing data is returned as an empty set (not 0): stored as 'unavailable'.
- *  - No per-second retention curve is exposed for Reels: only average & total watch time.
+ *  - No per-second retention curve is exposed for Reels: only average & total watch time, and the skip rate (first 3 seconds).
  *  - Watch-time metrics are returned in milliseconds.
  */
-const REEL_METRICS = ['views', 'reach', 'likes', 'comments', 'shares', 'saved', 'total_interactions', 'ig_reels_avg_watch_time', 'ig_reels_video_view_total_time'];
+// reels_skip_rate: share of views skipped in the first 3 seconds (Meta marks it as estimated and in development). It is the only
+// "hook" number Instagram gives, because there is no per-second retention curve. A failing metric is retried alone (fetchInsights).
+const REEL_METRICS = ['views', 'reach', 'likes', 'comments', 'shares', 'saved', 'total_interactions', 'ig_reels_avg_watch_time', 'ig_reels_video_view_total_time', 'reels_skip_rate'];
 const FEED_METRICS = ['views', 'reach', 'likes', 'comments', 'shares', 'saved', 'total_interactions', 'profile_visits', 'follows'];
 const MAP: Record<string, { key: string; scale?: number }> = {
   views: { key: 'views' }, reach: { key: 'reach' }, likes: { key: 'likes' }, comments: { key: 'comments' },
@@ -19,6 +21,7 @@ const MAP: Record<string, { key: string; scale?: number }> = {
   ig_reels_avg_watch_time: { key: 'avg_watch_time_sec', scale: 1 / 1000 },
   ig_reels_video_view_total_time: { key: 'total_watch_time_sec', scale: 1 / 1000 },
   profile_visits: { key: 'profile_visits' }, follows: { key: 'follows' },
+  reels_skip_rate: { key: 'skip_rate' },   // percent, stored as reported
 };
 
 export const instagramAdapter: PlatformAdapter = {

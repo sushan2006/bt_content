@@ -6,6 +6,23 @@ import { authenticate, hashPassword, invalidateUser, requirePermission } from '.
 import { audit } from '../lib/audit.js';
 import { analyzerHealth } from '../services/videoAnalysis.js';
 
+const goodZone = (z: string) => { try { new Intl.DateTimeFormat('en', { timeZone: z }); return true; } catch { return false; } };
+/** Checks for the analytics settings; unknown keys in the saved object are kept as they are. */
+const SETTING_SCHEMAS: Record<string, z.ZodTypeAny> = {
+  analysis: z.object({
+    min_sample_preliminary: z.number().int().min(2).max(100), min_sample_moderate: z.number().int().min(2).max(100), min_sample_strong: z.number().int().min(2).max(100),
+    alpha: z.number().min(0.001).max(0.2), bootstrap_iterations: z.number().int().min(200).max(10000),
+  }).passthrough().refine((v) => v.min_sample_preliminary <= v.min_sample_moderate && v.min_sample_moderate <= v.min_sample_strong, 'The sample sizes must go up: preliminary <= moderate <= strong'),
+  sync: z.object({
+    interval_minutes: z.number().int().min(60).max(10080), backfill_days: z.number().int().min(7).max(365),
+    max_media_per_sync: z.number().int().min(50).max(2000), stale_after_hours: z.number().int().min(1).max(336),
+  }).passthrough(),
+  company: z.object({
+    name: z.string().trim().min(1).max(100), website: z.string().trim().max(200).optional(),
+    intro_keywords: z.array(z.string().trim().min(1).max(60)).max(40).optional(), timezone: z.string().max(60).refine(goodZone, 'Unknown timezone').optional(),
+  }).passthrough(),
+};
+
 export async function adminRoutes(app: FastifyInstance) {
   // ---------- Users
   app.get('/api/users', { preHandler: requirePermission('users.manage') }, async () =>
@@ -39,6 +56,8 @@ export async function adminRoutes(app: FastifyInstance) {
   });
   app.put('/api/settings/:key', { preHandler: requirePermission('settings.manage') }, async (req) => {
     const { key } = req.params as any;
+    const schema = SETTING_SCHEMAS[key];
+    if (schema) req.body = schema.parse(req.body);
     await q(`INSERT INTO app_settings (key, value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, [key, JSON.stringify(req.body)]);
     await audit(req.user_!.id, 'settings.update', 'setting', key, req.body);
     return { ok: true };
@@ -52,8 +71,7 @@ export async function adminRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
-  app.get('/api/audit', { preHandler: requirePermission('audit.view') }, async () =>
-    q(`SELECT a.*, u.full_name, u.email FROM audit_logs a LEFT JOIN users u ON u.id=a.user_id ORDER BY a.created_at DESC LIMIT 500`));
+  // The audit log (list, summary, filters, CSV) is in routes/audit.ts
 
   app.get('/api/system/health', { preHandler: authenticate }, async () => ({
     api: 'ok', db: (await one('SELECT 1 AS ok'))?.ok === 1, analyzer: await analyzerHealth(),

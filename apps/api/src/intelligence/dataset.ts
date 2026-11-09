@@ -53,16 +53,28 @@ export async function loadDataset(scope: 'live' | 'demo' | 'all' = 'live'): Prom
   const analyses = contentIds.length ? await q<any>(
     `SELECT DISTINCT ON (content_item_id) content_item_id, transcript, scenes, silences, frames FROM video_analysis_results
       WHERE content_item_id = ANY($1) AND status='succeeded' ORDER BY content_item_id, created_at DESC`, [contentIds]) : [];
-  const evBy = new Map(analyses.map((a) => [a.content_item_id, { transcript: a.transcript, scenes: a.scenes, silences: a.silences, frames: a.frames }]));
   const tpl = (await q<any>(`SELECT segments FROM segment_templates WHERE is_default ORDER BY id LIMIT 1`))[0]?.segments as TemplateSegment[] | undefined;
+  return buildRows({ pubs, metrics, curves, feats, analyses, tpl });
+}
 
+export interface RawDataset {
+  pubs: any[]; metrics: { publication_id: string; metric_key: string; value: any; availability: string }[];
+  curves: { publication_id: string; points: CurvePoint[]; duration_sec: any }[];
+  feats: { content_item_id: string; feature_key: string; value_text: string | null; value_num: any }[];
+  analyses: { content_item_id: string; transcript: any; scenes: any; silences: any; frames: any }[];
+  tpl?: TemplateSegment[];
+}
+
+/** Pure part of loading: raw database rows → analysis rows with derived outcomes (unit-testable without a database). */
+export function buildRows({ pubs, metrics, curves, feats, analyses, tpl }: RawDataset): PubRow[] {
+  const evBy = new Map(analyses.map((a) => [a.content_item_id, { transcript: a.transcript, scenes: a.scenes, silences: a.silences, frames: a.frames }]));
   const byPub = new Map<string, PubRow>();
   for (const p of pubs) {
     byPub.set(p.publication_id, { ...p, duration: p.duration === null ? null : Number(p.duration), features: {}, metrics: {}, availability: {}, curve: null, curve_resolution_sec: null, segments: null, derived: {}, events: null });
   }
   for (const m of metrics) {
     const r = byPub.get(m.publication_id)!;
-    r.metrics[m.metric_key] = m.availability === 'available' ? m.value : null;
+    r.metrics[m.metric_key] = m.availability === 'available' && m.value != null ? Number(m.value) : null;
     r.availability[m.metric_key] = m.availability;
   }
   for (const c of curves) {
@@ -101,6 +113,12 @@ export async function loadDataset(scope: 'live' | 'demo' | 'all' = 'live'): Prom
         r.derived.retention_at_cta = end?.start_retention ?? null;
       }
     }
+    // Instagram gives no curve, but it does give the skip rate: the share of views skipped in the first 3 seconds.
+    if (r.derived.retention_3s == null && m.skip_rate != null) {
+      const skip = m.skip_rate > 1 ? m.skip_rate / 100 : m.skip_rate; // the API reports a percentage
+      if (skip >= 0 && skip <= 1) { r.derived.retention_3s = 1 - skip; r.derived.hook_from_skip_rate = 1; }
+    }
+    r.derived.age_days = r.published_at ? (Date.now() - Date.parse(r.published_at)) / 864e5 : null;
   }
   return [...byPub.values()];
 }

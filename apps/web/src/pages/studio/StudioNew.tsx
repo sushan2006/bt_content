@@ -4,6 +4,7 @@ import { api, useApi } from '../../lib';
 import { Button, Card, ErrorBox, Field, inputCls, PageHeader } from '../../components/ui';
 import { PresetCard, PresetDetail } from './StudioStyles';
 import { fmtLength, KIND, listInput, PLATFORMS, uploadFiles } from './common';
+import { LearningsBox } from './Learnings';
 
 const LENGTHS = [15, 30, 45, 60, 90, 120];
 type NewMachine = { name: string; notes: string; photos: File[] };
@@ -17,7 +18,6 @@ export default function StudioNew() {
   const music = (useApi<any[]>('/api/studio/music').data ?? []).filter((m) => m.is_active && !m.content_id_registered && m.license_path);
   const savedMachines = useApi<any[]>('/api/studio/machines').data ?? [];
   const presets = styles.filter((s) => s.group === 'preset');
-  const refs = styles.filter((s) => s.group === 'reference' && s.status === 'ready');
 
   const [style, setStyle] = useState<string | null>(params.get('style'));
   const [detail, setDetail] = useState<any>(null);
@@ -101,6 +101,7 @@ export default function StudioNew() {
   return (
     <>
       <PageHeader title="New video" subtitle="Pick a look, describe the topic, choose the format. You get the prompt for Claude Code on the next page." />
+      <LearningsBox style={style} platforms={platforms} />
       <div className="grid lg:grid-cols-3 gap-5">
         <div className="lg:col-span-2 space-y-5">
           <Card title="1. Pick a style" subtitle="Click a style to select it. ⓘ shows it moving with what it is best for.">
@@ -111,14 +112,6 @@ export default function StudioNew() {
                   <button type="button" title="See this style" onClick={() => setDetail(s)} className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-white/90 border border-stone-300 text-xs font-semibold text-ink-2 hover:text-ink">i</button>
                 </div>))}
             </div>
-            {refs.length > 0 && (
-              <div className="mt-4">
-                <div className="text-xs font-medium text-ink-2 mb-1">Or copy the style of one of your reference videos</div>
-                <div className="flex flex-wrap gap-2">{refs.map((r) => (
-                  <button key={r.key} type="button" onClick={() => pick(r.key)} className={`text-sm px-3 py-1.5 rounded-lg border ${style === r.key ? 'border-ink bg-stone-100 font-medium' : 'border-stone-200 hover:border-stone-400'}`}>{r.name}</button>))}
-                </div>
-              </div>)}
-            <div className="text-[11px] text-ink-3 mt-2">Add a style from a video you like in <Link className="underline" to="/studio/styles">Styles &amp; music</Link>.</div>
           </Card>
           {detail && <PresetDetail s={detail} onClose={() => setDetail(null)} action={<Button variant="primary" onClick={() => { pick(detail.key); setDetail(null); }}>Use this style</Button>} />}
 
